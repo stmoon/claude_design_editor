@@ -241,22 +241,54 @@
     const name = body.dataset.cdeLayout;
     const kids = (el) => [...el.children].filter(notUI);
     const byOrder = (a, b) => (getComputedStyle(a).order | 0) - (getComputedStyle(b).order | 0);
+    const out = [];
+
     if (['bottom', 'top', 'left', 'right'].includes(name)) {
       const [a, b] = kids(body).sort(byOrder);
       const axis = (name === 'left' || name === 'right') ? 'x' : 'y';
-      return a && b ? [{ host: body, axis, prop: '--cde-a', a, b }] : [];
-    }
-    if (name === 'quad') {
+      if (a && b) out.push({ kind: 'ratio', host: body, axis, prop: '--cde-a', a, b });
+    } else if (name === 'quad') {
       const cols = kids(body);
-      const out = [];
-      if (cols.length === 2) out.push({ host: body, axis: 'x', prop: '--cde-a', a: cols[0], b: cols[1] });
+      if (cols.length === 2) {
+        out.push({ kind: 'ratio', host: body, axis: 'x', prop: '--cde-a', a: cols[0], b: cols[1] });
+      }
       cols.forEach((col) => {
         const [a, b] = kids(col);
-        if (a && b) out.push({ host: col, axis: 'y', prop: '--cde-row', a, b });
+        if (a && b) out.push({ kind: 'ratio', host: col, axis: 'y', prop: '--cde-row', a, b });
       });
-      return out;
     }
-    return [];
+
+    // Boundaries between the media cells themselves - figure/figure, figure/table.
+    body.querySelectorAll('.cde-media').forEach((mbox) => {
+      if (kids(mbox).length < 2) return;
+      const cs = getComputedStyle(mbox);
+      const cols = cs.gridTemplateColumns.split(' ').filter(Boolean).length;
+      const rows = cs.gridTemplateRows.split(' ').filter(Boolean).length;
+      for (let i = 0; i < cols - 1; i++) {
+        out.push({ kind: 'track', host: mbox, axis: 'x', prop: '--cde-ctpl', index: i });
+      }
+      for (let j = 0; j < rows - 1; j++) {
+        out.push({ kind: 'track', host: mbox, axis: 'y', prop: '--cde-rtpl', index: j });
+      }
+    });
+    return out;
+  }
+
+  // Used track sizes in px, plus the gap between them.
+  function tracks(sp) {
+    const cs = getComputedStyle(sp.host);
+    const list = (sp.axis === 'x' ? cs.gridTemplateColumns : cs.gridTemplateRows)
+      .split(' ').filter(Boolean).map(parseFloat);
+    const gap = parseFloat(sp.axis === 'x' ? cs.columnGap : cs.rowGap) || 0;
+    return { list, gap };
+  }
+
+  // Offset of the boundary after track `index`, measured inside the host.
+  function boundaryAt(sp) {
+    const { list, gap } = tracks(sp);
+    let at = 0;
+    for (let i = 0; i <= sp.index; i++) at += list[i] + gap;
+    return at - gap / 2;
   }
 
   let splits = [], dragging = false;
@@ -282,16 +314,42 @@
     splits.forEach((sp, i) => {
       const h = sp.host.querySelector(`:scope > .cde-handle[data-cde-h="${i}"]`);
       if (!h) return;
-      const hb = sp.host.getBoundingClientRect();
-      const ab = sp.a.getBoundingClientRect(), bb = sp.b.getBoundingClientRect();
-      if (sp.axis === 'x') {
-        const mid = (ab.right + bb.left) / 2;
-        h.style.cssText = `left:${(mid - hb.left) / scale - 13}px;top:0;height:100%;width:26px`;
+      let at;
+      if (sp.kind === 'track') {
+        at = boundaryAt(sp);
       } else {
-        const mid = (ab.bottom + bb.top) / 2;
-        h.style.cssText = `top:${(mid - hb.top) / scale - 13}px;left:0;width:100%;height:26px`;
+        const hb = sp.host.getBoundingClientRect();
+        const ab = sp.a.getBoundingClientRect(), bb = sp.b.getBoundingClientRect();
+        at = sp.axis === 'x'
+          ? ((ab.right + bb.left) / 2 - hb.left) / scale
+          : ((ab.bottom + bb.top) / 2 - hb.top) / scale;
       }
+      h.style.cssText = sp.axis === 'x'
+        ? `left:${at - 13}px;top:0;height:100%;width:26px`
+        : `top:${at - 13}px;left:0;width:100%;height:26px`;
     });
+  }
+
+  const scaleOf = () =>
+    parseFloat(sdoc().documentElement.style.getPropertyValue('--cde-scale')) || 1;
+
+  // Move one boundary: the two tracks either side of it trade width, everything
+  // else stays put, so the other rows and columns stay aligned.
+  function resizeTrack(sp, want) {
+    const { list, gap } = tracks(sp);
+    const i = sp.index;
+    if (list.length < 2) return;
+    const before = list.slice(0, i).reduce((a, b) => a + b, 0) + i * gap;
+    const pair = list[i] + list[i + 1];
+    // Floor scales with the deck so a track never collapses to a sliver.
+    const min = Math.min(pair / 2, Math.max(90, list.reduce((a, b) => a + b, 0) * 0.1));
+    let first = want - before - gap / 2;
+    first = Math.max(min, Math.min(pair - min, first));
+    list[i] = first;
+    list[i + 1] = pair - first;
+    const total = list.reduce((a, b) => a + b, 0) || 1;
+    sp.host.style.setProperty(sp.prop,
+      list.map((v) => (v / total * list.length).toFixed(4) + 'fr').join(' '));
   }
 
   function startDrag(e) {
@@ -309,10 +367,14 @@
     // Listeners sit on the document so the drag survives leaving the handle.
     const move = (ev) => {
       const hb = sp.host.getBoundingClientRect();
-      const raw = sp.axis === 'x'
-        ? (ev.clientX - hb.left) / hb.width
-        : (ev.clientY - hb.top) / hb.height;
-      sp.host.style.setProperty(sp.prop, Math.max(12, Math.min(88, raw * 100)).toFixed(1) + '%');
+      const inner = sp.axis === 'x'
+        ? (ev.clientX - hb.left) / (hb.width || 1)
+        : (ev.clientY - hb.top) / (hb.height || 1);
+      if (sp.kind === 'track') {
+        resizeTrack(sp, inner * (sp.axis === 'x' ? hb.width : hb.height) / scaleOf());
+      } else {
+        sp.host.style.setProperty(sp.prop, Math.max(12, Math.min(88, inner * 100)).toFixed(1) + '%');
+      }
       placeHandles();
     };
     const up = () => {
@@ -336,6 +398,9 @@
     const mbox = item.parentElement?.closest('.cde-media');
     item.remove();
     if (mbox) {
+      // The dragged tracks describe a grid that no longer exists.
+      mbox.style.removeProperty('--cde-ctpl');
+      mbox.style.removeProperty('--cde-rtpl');
       const left = [...mbox.children].filter(notUI).length;
       const cols = Number(mbox.style.getPropertyValue('--cde-cols')) || 1;
       if (left < cols) setCols(Math.max(1, left));
@@ -467,7 +532,12 @@
     if (!body) return;
     const value = String(Math.max(1, Math.min(6, n)));
     body.style.setProperty('--cde-cols', value);
-    body.querySelectorAll('.cde-media').forEach((m) => m.style.setProperty('--cde-cols', value));
+    body.querySelectorAll('.cde-media').forEach((m) => {
+      m.style.setProperty('--cde-cols', value);
+      // Hand-dragged tracks no longer match the new grid.
+      m.style.removeProperty('--cde-ctpl');
+      m.style.removeProperty('--cde-rtpl');
+    });
     $('cols').textContent = value;
   }
 
@@ -614,8 +684,11 @@
     if (act === 'save') save();
     if (act === 'saveas') saveAs();
     if (act === 'add') askImage(null, null, null);
-    if (act === 'cols+') { setCols(Number($('cols').textContent) + 1); markDirty(); }
-    if (act === 'cols-') { setCols(Number($('cols').textContent) - 1); markDirty(); }
+    if (act === 'cols+' || act === 'cols-') {
+      setCols(Number($('cols').textContent) + (act === 'cols+' ? 1 : -1));
+      select(current);
+      markDirty();
+    }
   });
 
   $('layout').addEventListener('change', (e) => {

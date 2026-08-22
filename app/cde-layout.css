@@ -68,10 +68,13 @@
 .cde-text > * { margin-top: 0; margin-bottom: 0; }
 
 /* Every figure gets an equal cell, so rows and columns stay aligned. */
+/* --cde-ctpl / --cde-rtpl hold hand-dragged track sizes; without them the
+ * cells stay equal, which is what keeps rows and columns aligned. */
 .cde-media {
   display: grid;
   gap: var(--cde-fgap, 44px);
-  grid-template-columns: repeat(var(--cde-cols, 1), minmax(0, 1fr));
+  grid-template-columns: var(--cde-ctpl, repeat(var(--cde-cols, 1), minmax(0, 1fr)));
+  grid-template-rows: var(--cde-rtpl, none);
   grid-auto-rows: minmax(0, 1fr);
   align-items: stretch;
   justify-items: stretch;

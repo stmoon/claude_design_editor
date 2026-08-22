@@ -34,7 +34,7 @@ html[data-cde="stage"] [data-cde-slide][data-cde-current] {
 .cde-handle[data-cde-axis="y"]::after { height: 6px; border-radius: 3px; }
 
 /* Add-a-figure buttons on the four sides of a figure. */
-.cde-media > * { position: relative; }
+[data-cde-edit] .cde-media { position: relative; }
 .cde-plus {
   position: absolute; z-index: 45; width: 30px; height: 30px; padding: 0;
   border: 0; border-radius: 50%; cursor: pointer;
@@ -50,8 +50,8 @@ html[data-cde="stage"] [data-cde-slide][data-cde-current] {
 .cde-plus[data-cde-side="bottom"] { bottom: -15px; left: 50%; margin-left: -15px; }
 /* Every block and every bullet can be removed, so anything holding a delete
  * button needs to be a positioning context. */
-[data-cde-edit] .cde-media > *,
-[data-cde-edit] .cde-text > *,
+[data-cde-edit] .cde-media > *:not([data-cde-ui]),
+[data-cde-edit] .cde-text > *:not([data-cde-ui]),
 [data-cde-edit] .cde-text li { position: relative; }
 .cde-del {
   position: absolute; z-index: 45; top: 6px; right: 6px;
