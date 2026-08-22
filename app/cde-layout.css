@@ -1,0 +1,69 @@
+/* Claude Design Editor - layout rules.
+ *
+ * This file ships next to the deck and is linked from it, so a saved deck keeps
+ * its layout with the editor closed (printing included). Loaded after the deck's
+ * own stylesheet; the attribute selector keeps it ahead on specificity.
+ */
+
+.body[data-cde-layout] {
+  display: grid;
+  gap: var(--cde-gap, 40px);
+  flex: 1 1 auto;
+  min-height: 0;
+  align-content: stretch;
+}
+.body[data-cde-layout] > .cde-text,
+.body[data-cde-layout] > .cde-media { min-width: 0; min-height: 0; }
+
+/* --cde-a sizes the first track. The editor's drag handle writes it inline. */
+.body[data-cde-layout="bottom"],
+.body[data-cde-layout="top"] {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: var(--cde-a, auto) minmax(0, 1fr);
+}
+.body[data-cde-layout="right"],
+.body[data-cde-layout="left"] {
+  grid-template-columns: var(--cde-a, 1fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+.body[data-cde-layout="text"],
+.body[data-cde-layout="media"] {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+/* Text first in the DOM always; order decides what the viewer sees first. */
+.body[data-cde-layout="bottom"] > .cde-text,
+.body[data-cde-layout="right"]  > .cde-text { order: 0; }
+.body[data-cde-layout="bottom"] > .cde-media,
+.body[data-cde-layout="right"]  > .cde-media { order: 1; }
+.body[data-cde-layout="top"]  > .cde-media,
+.body[data-cde-layout="left"] > .cde-media { order: 0; }
+.body[data-cde-layout="top"]  > .cde-text,
+.body[data-cde-layout="left"] > .cde-text { order: 1; }
+
+.body[data-cde-layout="text"] > .cde-media,
+.body[data-cde-layout="media"] > .cde-text { display: none; }
+
+.cde-text { display: flex; flex-direction: column; gap: 18px; }
+.cde-text > * { margin-top: 0; margin-bottom: 0; }
+
+/* Every figure gets an equal cell, so rows and columns stay aligned. */
+.cde-media {
+  display: grid;
+  gap: var(--cde-fgap, 20px);
+  grid-template-columns: repeat(var(--cde-cols, 1), minmax(0, 1fr));
+  grid-auto-rows: minmax(0, 1fr);
+  align-items: stretch;
+  justify-items: stretch;
+}
+.cde-media > * { margin: 0; min-width: 0; min-height: 0; }
+.cde-media > figure { display: flex; flex-direction: column; }
+.cde-media > figure > .frame,
+.cde-media > figure > span,
+.cde-media > figure > picture { flex: 1 1 auto; min-height: 0; display: flex; }
+.cde-media img, .cde-media svg {
+  width: 100%; height: 100%; max-width: 100%; max-height: 100%;
+  object-fit: contain;
+}
+.cde-media > table, .cde-media > .tbl { align-self: start; width: 100%; }
