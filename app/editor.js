@@ -11,10 +11,40 @@
 
   // Wrappers from hand-written decks that the layout model replaces.
   const UNWRAP = '.cols, .cols-fig, .col-text, .fig-stack, .cde-text, .cde-media, .cde-col';
-  const LAYOUTS = ['bottom', 'right', 'left', 'top', 'quad', 'text', 'media'];
+  // Each layout, with the regions its icon draws: [kind, x, y, w, h] in a 48x28 box.
+  const LAYOUTS = [
+    ['bottom', '글 위 · 그림 아래',  [['t', 3, 3, 42, 8], ['m', 3, 14, 42, 11]]],
+    ['right',  '글 왼쪽 · 그림 오른쪽', [['t', 3, 3, 19, 22], ['m', 25, 3, 20, 22]]],
+    ['left',   '그림 왼쪽 · 글 오른쪽', [['m', 3, 3, 20, 22], ['t', 26, 3, 19, 22]]],
+    ['top',    '그림 위 · 글 아래',  [['m', 3, 3, 42, 11], ['t', 3, 17, 42, 8]]],
+    ['quad',   '2단 · 각 단 글 위 그림 아래',
+     [['t', 3, 3, 19, 7], ['m', 3, 12, 19, 13], ['t', 26, 3, 19, 7], ['m', 26, 12, 19, 13]]],
+    ['text',   '글만',            [['t', 3, 3, 42, 22]]],
+    ['media',  '그림만',           [['m', 3, 3, 42, 22]]],
+  ];
+
+  // Text draws as stacked bars, media as a solid block - readable at 48px wide.
+  function layoutIcon(name) {
+    const spec = LAYOUTS.find((l) => l[0] === name);
+    if (!spec) return '';
+    const parts = spec[2].map(([kind, x, y, w, h]) => {
+      if (kind === 'm') {
+        return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="2" fill="#94a3b8"/>`;
+      }
+      const n = Math.max(1, Math.min(3, Math.floor(h / 4)));
+      return Array.from({ length: n }, (_, i) =>
+        `<rect x="${x}" y="${y + i * 4}" width="${i === n - 1 ? Math.round(w * 0.6) : w}"` +
+        ` height="2" rx="1" fill="#60a5fa"/>`).join('');
+    }).join('');
+    return `<svg width="48" height="28" viewBox="0 0 48 28" aria-hidden="true">` +
+           `<rect x="0.5" y="0.5" width="47" height="27" rx="3" fill="#fff" stroke="#cbd5e1"/>` +
+           parts + `</svg>`;
+  }
   const notUI = (el) => !el.hasAttribute('data-cde-ui');
 
   let cfg = null, deckName = '', current = 0, dirty = false;
+  const undoStack = [];
+  const UNDO_MAX = 60;
   let lastMtime = 0, saveTimer = null, pendingInsert = null;
 
   const deckUrl = (name) => '/deck/' + encodeURIComponent(name);
@@ -80,6 +110,13 @@
     select(Math.min(current, slides(doc).length - 1));
 
     doc.querySelectorAll(cfg.editable).forEach((el) => el.setAttribute('contenteditable', 'true'));
+    let burst = null;
+    doc.addEventListener('beforeinput', (e) => {
+      if (!e.target.isContentEditable) return;
+      if (!burst) pushUndo();
+      clearTimeout(burst);
+      burst = setTimeout(() => { burst = null; }, 900);
+    });
     doc.addEventListener('input', (e) => { if (e.target.isContentEditable) markDirty(); });
 
     // Click picks an item; Del removes it. Text keeps normal editing behaviour,
@@ -89,6 +126,11 @@
       selectItem(e.target.closest(DELETABLE));
     });
     doc.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
+        // Inside a text field the browser's own undo is the better one.
+        if (doc.activeElement && doc.activeElement.isContentEditable) return;
+        e.preventDefault(); undo(); return;
+      }
       if (e.key === 'Escape') { doc.activeElement?.blur?.(); return; }
       if (e.key !== 'Delete' && e.key !== 'Backspace') return;
       if (doc.activeElement && doc.activeElement.isContentEditable) return;
@@ -363,6 +405,7 @@
     try { handle.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
     handle.dataset.cdeDrag = '';
     dragging = true;
+    pushUndo();
 
     // Listeners sit on the document so the drag survives leaving the handle.
     const move = (ev) => {
@@ -395,6 +438,7 @@
   // the half-width cell the pair needed.
   function removeItem(item) {
     if (!item || item.hasAttribute('data-cde-ui')) return;
+    pushUndo();
     const mbox = item.parentElement?.closest('.cde-media');
     item.remove();
     if (mbox) {
@@ -491,6 +535,7 @@
     if (!body) return;
     const where = pendingInsert;
     pendingInsert = null;
+    pushUndo();
 
     let mbox = where?.mbox;
     if (!mbox || !body.contains(mbox)) {
@@ -544,10 +589,17 @@
   function syncToolbar() {
     const body = currentBody();
     const has = !!body?.querySelector('.cde-media')?.children.length;
-    $('layout').value = body?.dataset.cdeLayout || 'text';
-    $('layout').disabled = !body;
+    const name = body?.dataset.cdeLayout || 'text';
+    const spec = LAYOUTS.find((l) => l[0] === name);
+    $('layIcon').innerHTML = body ? layoutIcon(name) : '';
+    $('layName').textContent = body ? (spec ? spec[1] : name) : '레이아웃';
+    bar.querySelector('[data-act="pick"]').disabled = !body;
+    $('layMenu').querySelectorAll('button').forEach((b) => {
+      b.setAttribute('aria-pressed', String(b.dataset.layout === name));
+    });
     $('cols').textContent = body?.style.getPropertyValue('--cde-cols') || '1';
     bar.querySelectorAll('[data-act^="cols"]').forEach((b) => { b.disabled = !has; });
+    bar.querySelector('[data-act="undo"]').disabled = !undoStack.length;
   }
 
   // --- rail ----------------------------------------------------------------
@@ -607,6 +659,38 @@
       if (body && src) { body.dataset.cdeLayout = src.dataset.cdeLayout; body.style.cssText = src.style.cssText; }
       layoutRail();
     }, 250);
+  }
+
+  // --- undo ------------------------------------------------------------------
+  // One entry per action: the slide container as it looked just before it.
+  function deckHost() {
+    return slides(sdoc())[0]?.parentElement || null;
+  }
+
+  function pushUndo() {
+    const host = deckHost();
+    if (!host) return;
+    const clone = host.cloneNode(true);
+    clone.querySelectorAll('[data-cde-ui]').forEach((el) => el.remove());
+    clone.querySelectorAll('[contenteditable]').forEach((el) => el.removeAttribute('contenteditable'));
+    clone.querySelectorAll('[data-cde-sel]').forEach((el) => el.removeAttribute('data-cde-sel'));
+    clone.querySelectorAll('[data-cde-current]').forEach((el) => el.removeAttribute('data-cde-current'));
+    undoStack.push({ html: clone.innerHTML, index: current });
+    if (undoStack.length > UNDO_MAX) undoStack.shift();
+    bar.querySelector('[data-act="undo"]').disabled = false;
+  }
+
+  function undo() {
+    const step = undoStack.pop();
+    const host = deckHost();
+    if (!step || !host) return;
+    host.innerHTML = step.html;
+    const doc = sdoc();
+    slides(doc).forEach((s, i) => { s.dataset.cdeSlide = String(i); });
+    doc.querySelectorAll(cfg.editable).forEach((el) => el.setAttribute('contenteditable', 'true'));
+    current = Math.min(step.index, slides(doc).length - 1);
+    select(current);
+    markDirty('되돌림 - 저장 대기');
   }
 
   // --- save ------------------------------------------------------------------
@@ -681,25 +765,49 @@
   // --- chrome wiring ----------------------------------------------------------
   bar.addEventListener('click', (e) => {
     const act = e.target.dataset.act;
+    if (act === 'pick') { const m = $('layMenu'); m.hidden = !m.hidden; }
     if (act === 'save') save();
     if (act === 'saveas') saveAs();
     if (act === 'add') askImage(null, null, null);
+    if (act === 'undo') undo();
     if (act === 'cols+' || act === 'cols-') {
+      pushUndo();
       setCols(Number($('cols').textContent) + (act === 'cols+' ? 1 : -1));
       select(current);
       markDirty();
     }
   });
 
-  $('layout').addEventListener('change', (e) => {
+  function setLayout(name) {
     const slide = currentSlide();
     if (!slide) return;
+    pushUndo();
     sdoc().querySelectorAll('.cde-handle').forEach((el) => el.remove());
-    normalize(slide, e.target.value);
-    currentBody().style.removeProperty('--cde-a');
+    normalize(slide, name);
+    const body = currentBody();
+    body.style.removeProperty('--cde-a');
+    body.querySelectorAll('.cde-media').forEach((m) => {
+      m.style.removeProperty('--cde-ctpl');
+      m.style.removeProperty('--cde-rtpl');
+    });
     select(current);
     markDirty();
-  });
+  }
+
+  (() => {
+    const menu = $('layMenu');
+    LAYOUTS.forEach(([name, label]) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.dataset.layout = name;
+      b.innerHTML = layoutIcon(name) + '<span>' + label + '</span>';
+      b.addEventListener('click', () => { menu.hidden = true; setLayout(name); });
+      menu.appendChild(b);
+    });
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.lay-pick')) menu.hidden = true;
+    });
+  })();
 
   // Rail/stage splitter.
   (() => {
@@ -724,6 +832,7 @@
 
   document.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) { e.preventDefault(); save(); }
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); undo(); }
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
     if (e.key === 'PageDown' || e.key === 'ArrowDown') { e.preventDefault(); select(current + 1); }
     if (e.key === 'PageUp' || e.key === 'ArrowUp') { e.preventDefault(); select(current - 1); }

@@ -65,7 +65,11 @@
   display: flex; flex-direction: column; gap: 18px;
   justify-content: flex-start; align-content: start;
 }
-.cde-text > * { margin-top: 0; margin-bottom: 0; }
+/* Deck rules like `figure.fig { margin: 22px 0 0 }` carry a type selector, so
+ * these need two classes to outrank them - otherwise one area starts lower
+ * than the other and the two columns no longer line up at the top. */
+.body[data-cde-layout] .cde-text > *,
+.body[data-cde-layout] .cde-media > * { margin: 0; min-width: 0; min-height: 0; }
 
 /* Every figure gets an equal cell, so rows and columns stay aligned. */
 /* --cde-ctpl / --cde-rtpl hold hand-dragged track sizes; without them the
@@ -79,13 +83,16 @@
   align-items: stretch;
   justify-items: stretch;
 }
-.cde-media > * { margin: 0; min-width: 0; min-height: 0; }
-.cde-media > figure { display: flex; flex-direction: column; }
-.cde-media > figure > .frame,
-.cde-media > figure > span,
-.cde-media > figure > picture { flex: 1 1 auto; min-height: 0; display: flex; }
-.cde-media img, .cde-media svg {
+.body[data-cde-layout] .cde-media > figure { display: flex; flex-direction: column; }
+.body[data-cde-layout] .cde-media > figure > .frame,
+.body[data-cde-layout] .cde-media > figure > span,
+.body[data-cde-layout] .cde-media > figure > picture {
+  flex: 1 1 auto; min-height: 0; max-height: none; display: flex;
+}
+.body[data-cde-layout] .cde-media img,
+.body[data-cde-layout] .cde-media svg {
   width: 100%; height: 100%; max-width: 100%; max-height: 100%;
   object-fit: contain;
 }
-.cde-media > table, .cde-media > .tbl { width: 100%; }
+.body[data-cde-layout] .cde-media > table,
+.body[data-cde-layout] .cde-media > .tbl { width: 100%; }

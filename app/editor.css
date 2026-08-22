@@ -55,3 +55,31 @@ body {
 .grip:hover, body.dragging .grip { background: var(--sky); }
 body.dragging { user-select: none; }
 body.dragging iframe { pointer-events: none; }
+
+/* 레이아웃 선택 - 글 대신 배치 그림으로 고른다 */
+.lay-pick { position: relative; }
+.lay-btn {
+  display: flex; align-items: center; gap: 8px;
+  font: inherit; border: 1px solid var(--line); border-radius: 7px;
+  background: #fff; color: inherit; padding: 4px 10px 4px 6px; cursor: pointer;
+}
+.lay-btn:hover:not(:disabled) { border-color: var(--sky); }
+.lay-btn:disabled { opacity: 0.45; cursor: default; }
+.lay-ico { display: inline-flex; }
+.lay-ico svg, .lay-menu svg { display: block; flex: 0 0 auto; }
+
+.lay-menu {
+  position: absolute; top: calc(100% + 7px); left: 0; z-index: 60;
+  display: flex; flex-direction: column; gap: 4px; min-width: 250px;
+  padding: 8px; background: #fff; border: 1px solid var(--line);
+  border-radius: 10px; box-shadow: 0 10px 28px rgba(15, 23, 42, 0.18);
+}
+.lay-menu[hidden] { display: none; }
+.lay-menu button {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 10px 6px 7px; border: 1px solid transparent; border-radius: 8px;
+  background: none; font: inherit; color: inherit; cursor: pointer;
+  white-space: nowrap; text-align: left;
+}
+.lay-menu button:hover { background: #eff6ff; border-color: var(--sky); color: inherit; }
+.lay-menu button[aria-pressed="true"] { background: #dbeafe; border-color: var(--sky); }
