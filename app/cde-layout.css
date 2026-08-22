@@ -15,6 +15,9 @@
 .body[data-cde-layout] > .cde-text,
 .body[data-cde-layout] > .cde-media,
 .body[data-cde-layout] > .cde-col { min-width: 0; min-height: 0; }
+/* A dragged-shut area must not spill into the other one. */
+.body[data-cde-layout] > .cde-text,
+.body[data-cde-layout] > .cde-media { overflow: hidden; }
 
 /* --cde-a sizes the first track. The editor's drag handle writes it inline. */
 .body[data-cde-layout="bottom"],
@@ -96,3 +99,14 @@
 }
 .body[data-cde-layout] .cde-media > table,
 .body[data-cde-layout] .cde-media > .tbl { width: 100%; }
+
+/* 표 행 간격. 덱의 `.tbl td` 는 (0,1,1), `:first-child` 변형은 (0,2,1) 이라
+   세로 여백만 덮어쓰려면 클래스 세 개가 필요하다. */
+.body[data-cde-layout] .cde-media .tbl td,
+.body[data-cde-layout] .cde-media table td {
+  padding-top: var(--cde-trow, 16px); padding-bottom: var(--cde-trow, 16px);
+}
+.body[data-cde-layout] .cde-media .tbl th,
+.body[data-cde-layout] .cde-media table th {
+  padding-bottom: calc(var(--cde-trow, 16px) - 2px);
+}

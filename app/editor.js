@@ -221,10 +221,12 @@
     const body = slide.querySelector(cfg.body);
     if (!body) return;
     const doc = slide.ownerDocument;
+    // An explicit pick is always honoured. Only the automatic guess falls back
+    // to 'text', or picking a two-area layout on a text-only slide does nothing.
     let name = layout || body.dataset.cdeLayout || guessLayout(body);
     const { media, text } = collect(body);
     const cols = body.style.getPropertyValue('--cde-cols') || guessCols(body);
-    if (!media.length && name !== 'text') name = 'text';
+    if (!layout && !media.length && name !== 'text') name = 'text';
 
     if (name === 'quad') {
       // Two columns, each stacking its own text over its own media.
@@ -284,6 +286,15 @@
     const kids = (el) => [...el.children].filter(notUI);
     const byOrder = (a, b) => (getComputedStyle(a).order | 0) - (getComputedStyle(b).order | 0);
     const out = [];
+
+    // Outer edges: drag the body's own padding in from the top/bottom (vertical
+    // layouts) or the left/right (side-by-side ones).
+    const vertical = ['bottom', 'top', 'text', 'media'].includes(name);
+    const pads = vertical
+      ? [['paddingTop', 'y', 'start'], ['paddingBottom', 'y', 'end']]
+      : [['paddingLeft', 'x', 'start'], ['paddingRight', 'x', 'end']];
+    pads.forEach(([prop, axis, side]) =>
+      out.push({ kind: 'pad', host: body, axis, prop, side }));
 
     if (['bottom', 'top', 'left', 'right'].includes(name)) {
       const [a, b] = kids(body).sort(byOrder);
@@ -345,7 +356,7 @@
       doc.querySelectorAll('.cde-handle').forEach((el) => el.remove());
       splits.forEach((sp, i) => {
         const h = doc.createElement('div');
-        h.className = 'cde-handle';
+        h.className = 'cde-handle' + (sp.kind === 'pad' ? ' cde-edge' : '');
         h.setAttribute('data-cde-ui', '');
         h.dataset.cdeH = String(i);
         h.dataset.cdeAxis = sp.axis;
@@ -357,7 +368,13 @@
       const h = sp.host.querySelector(`:scope > .cde-handle[data-cde-h="${i}"]`);
       if (!h) return;
       let at;
-      if (sp.kind === 'track') {
+      if (sp.kind === 'pad') {
+        const cs = getComputedStyle(sp.host);
+        const pad = parseFloat(cs[sp.prop]) || 0;
+        const full = (sp.axis === 'x' ? sp.host.getBoundingClientRect().width
+                                      : sp.host.getBoundingClientRect().height) / scale;
+        at = sp.side === 'start' ? pad + 13 : full - pad - 13;
+      } else if (sp.kind === 'track') {
         at = boundaryAt(sp);
       } else {
         const hb = sp.host.getBoundingClientRect();
@@ -366,9 +383,17 @@
           ? ((ab.right + bb.left) / 2 - hb.left) / scale
           : ((ab.bottom + bb.top) / 2 - hb.top) / scale;
       }
+      // Keep the whole 26px handle inside the host, or it becomes ungrabbable
+      // once the boundary reaches the very top or the very bottom.
+      const hb = sp.host.getBoundingClientRect();
+      const span = (sp.axis === 'x' ? hb.width : hb.height) / scale;
+      // Edge handles own the outermost band, so the middle one stops short of
+      // it - otherwise the two stack up and neither can be grabbed.
+      const inset = sp.kind === 'ratio' ? 30 : 0;
+      const at2 = Math.max(inset, Math.min(span - 26 - inset, at - 13));
       h.style.cssText = sp.axis === 'x'
-        ? `left:${at - 13}px;top:0;height:100%;width:26px`
-        : `top:${at - 13}px;left:0;width:100%;height:26px`;
+        ? `left:${at2}px;top:0;height:100%;width:26px`
+        : `top:${at2}px;left:0;width:100%;height:26px`;
     });
   }
 
@@ -413,10 +438,16 @@
       const inner = sp.axis === 'x'
         ? (ev.clientX - hb.left) / (hb.width || 1)
         : (ev.clientY - hb.top) / (hb.height || 1);
-      if (sp.kind === 'track') {
-        resizeTrack(sp, inner * (sp.axis === 'x' ? hb.width : hb.height) / scaleOf());
+      const scale = scaleOf();
+      const full = (sp.axis === 'x' ? hb.width : hb.height) / scale;
+      if (sp.kind === 'pad') {
+        const want = sp.side === 'start' ? inner * full : full - inner * full;
+        sp.host.style[sp.prop] = Math.max(0, Math.min(full * 0.4, want)).toFixed(0) + 'px';
+      } else if (sp.kind === 'track') {
+        resizeTrack(sp, inner * full);
       } else {
-        sp.host.style.setProperty(sp.prop, Math.max(12, Math.min(88, inner * 100)).toFixed(1) + '%');
+        // Full range: one area may be pushed all the way shut.
+        sp.host.style.setProperty(sp.prop, Math.max(0, Math.min(100, inner * 100)).toFixed(1) + '%');
       }
       placeHandles();
     };
@@ -586,6 +617,19 @@
     $('cols').textContent = value;
   }
 
+  // 표 행 간격 - 슬라이드 안의 모든 표에 같이 적용한다.
+  function tablesOf() {
+    const body = currentBody();
+    return body ? [...body.querySelectorAll('.cde-media table, .cde-media .tbl')] : [];
+  }
+
+  function setRowGap(px) {
+    const value = Math.max(2, Math.min(48, px));
+    tablesOf().forEach((tb) => tb.style.setProperty('--cde-trow', value + 'px'));
+    $('trow').textContent = String(value);
+    return value;
+  }
+
   function syncToolbar() {
     const body = currentBody();
     const has = !!body?.querySelector('.cde-media')?.children.length;
@@ -599,6 +643,9 @@
     });
     $('cols').textContent = body?.style.getPropertyValue('--cde-cols') || '1';
     bar.querySelectorAll('[data-act^="cols"]').forEach((b) => { b.disabled = !has; });
+    const tabs = tablesOf();
+    $('trow').textContent = (tabs[0]?.style.getPropertyValue('--cde-trow') || '16px').replace('px', '');
+    bar.querySelectorAll('[data-act^="row"]').forEach((b) => { b.disabled = !tabs.length; });
     bar.querySelector('[data-act="undo"]').disabled = !undoStack.length;
   }
 
@@ -770,6 +817,12 @@
     if (act === 'saveas') saveAs();
     if (act === 'add') askImage(null, null, null);
     if (act === 'undo') undo();
+    if (act === 'row+' || act === 'row-') {
+      pushUndo();
+      setRowGap(Number($('trow').textContent) + (act === 'row+' ? 4 : -4));
+      placeHandles();
+      markDirty();
+    }
     if (act === 'cols+' || act === 'cols-') {
       pushUndo();
       setCols(Number($('cols').textContent) + (act === 'cols+' ? 1 : -1));
