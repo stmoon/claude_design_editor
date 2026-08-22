@@ -311,6 +311,14 @@
       });
     }
 
+    // Every table row boundary is draggable; the whole table keeps one row
+    // height, so the rows stay even however the boundary is moved.
+    body.querySelectorAll('table, .tbl').forEach((table) => {
+      [...table.querySelectorAll('tbody tr')].forEach((tr) => {
+        out.push({ kind: 'trow', host: body, target: table, row: tr, axis: 'y' });
+      });
+    });
+
     // Boundaries between the media cells themselves - figure/figure, figure/table.
     body.querySelectorAll('.cde-media').forEach((mbox) => {
       if (kids(mbox).length < 2) return;
@@ -356,7 +364,9 @@
       doc.querySelectorAll('.cde-handle').forEach((el) => el.remove());
       splits.forEach((sp, i) => {
         const h = doc.createElement('div');
-        h.className = 'cde-handle' + (sp.kind === 'pad' ? ' cde-edge' : '');
+        h.className = 'cde-handle'
+          + (sp.kind === 'pad' ? ' cde-edge' : '')
+          + (sp.kind === 'trow' ? ' cde-row' : '');
         h.setAttribute('data-cde-ui', '');
         h.dataset.cdeH = String(i);
         h.dataset.cdeAxis = sp.axis;
@@ -368,7 +378,19 @@
       const h = sp.host.querySelector(`:scope > .cde-handle[data-cde-h="${i}"]`);
       if (!h) return;
       let at;
-      if (sp.kind === 'pad') {
+      if (sp.kind === 'trow') {
+        const hb = sp.host.getBoundingClientRect();
+        const rr = sp.row.getBoundingClientRect();
+        const tb = sp.target.getBoundingClientRect();
+        h.style.cssText =
+          `top:${(rr.bottom - hb.top) / scale - 13}px;` +
+          `left:${(tb.left - hb.left) / scale}px;` +
+          `width:${tb.width / scale}px;height:26px`;
+        return;
+      }
+      if (sp.kind === 'trow') {
+        resizeRows(sp, ev.clientY);
+      } else if (sp.kind === 'pad') {
         const cs = getComputedStyle(sp.host);
         const pad = parseFloat(cs[sp.prop]) || 0;
         const full = (sp.axis === 'x' ? sp.host.getBoundingClientRect().width
@@ -419,6 +441,20 @@
       list.map((v) => (v / total * list.length).toFixed(4) + 'fr').join(' '));
   }
 
+  // Drag any row boundary: the rows above it share the change, so one drag
+  // resizes the whole table evenly.
+  const ROW_MIN = 2, ROW_MAX = 60;
+  function resizeRows(sp, clientY) {
+    const rows = [...sp.target.querySelectorAll('tbody tr')];
+    const n = rows.indexOf(sp.row) + 1;
+    if (n < 1) return;
+    const cell = sp.row.querySelector('td, th');
+    const pad = parseFloat(getComputedStyle(cell).paddingTop) || 16;
+    const delta = (clientY - sp.row.getBoundingClientRect().bottom) / scaleOf();
+    const next = Math.max(ROW_MIN, Math.min(ROW_MAX, pad + delta / (2 * n)));
+    sp.target.style.setProperty('--cde-trow', next.toFixed(1) + 'px');
+  }
+
   function startDrag(e) {
     e.preventDefault();
     const handle = e.currentTarget;
@@ -440,7 +476,9 @@
         : (ev.clientY - hb.top) / (hb.height || 1);
       const scale = scaleOf();
       const full = (sp.axis === 'x' ? hb.width : hb.height) / scale;
-      if (sp.kind === 'pad') {
+      if (sp.kind === 'trow') {
+        resizeRows(sp, ev.clientY);
+      } else if (sp.kind === 'pad') {
         const want = sp.side === 'start' ? inner * full : full - inner * full;
         sp.host.style[sp.prop] = Math.max(0, Math.min(full * 0.4, want)).toFixed(0) + 'px';
       } else if (sp.kind === 'track') {
@@ -617,19 +655,6 @@
     $('cols').textContent = value;
   }
 
-  // 표 행 간격 - 슬라이드 안의 모든 표에 같이 적용한다.
-  function tablesOf() {
-    const body = currentBody();
-    return body ? [...body.querySelectorAll('.cde-media table, .cde-media .tbl')] : [];
-  }
-
-  function setRowGap(px) {
-    const value = Math.max(2, Math.min(48, px));
-    tablesOf().forEach((tb) => tb.style.setProperty('--cde-trow', value + 'px'));
-    $('trow').textContent = String(value);
-    return value;
-  }
-
   function syncToolbar() {
     const body = currentBody();
     const has = !!body?.querySelector('.cde-media')?.children.length;
@@ -643,9 +668,6 @@
     });
     $('cols').textContent = body?.style.getPropertyValue('--cde-cols') || '1';
     bar.querySelectorAll('[data-act^="cols"]').forEach((b) => { b.disabled = !has; });
-    const tabs = tablesOf();
-    $('trow').textContent = (tabs[0]?.style.getPropertyValue('--cde-trow') || '16px').replace('px', '');
-    bar.querySelectorAll('[data-act^="row"]').forEach((b) => { b.disabled = !tabs.length; });
     bar.querySelector('[data-act="undo"]').disabled = !undoStack.length;
   }
 
@@ -817,12 +839,6 @@
     if (act === 'saveas') saveAs();
     if (act === 'add') askImage(null, null, null);
     if (act === 'undo') undo();
-    if (act === 'row+' || act === 'row-') {
-      pushUndo();
-      setRowGap(Number($('trow').textContent) + (act === 'row+' ? 4 : -4));
-      placeHandles();
-      markDirty();
-    }
     if (act === 'cols+' || act === 'cols-') {
       pushUndo();
       setCols(Number($('cols').textContent) + (act === 'cols+' ? 1 : -1));

@@ -31,6 +31,9 @@ html[data-cde="stage"] [data-cde-slide][data-cde-current] {
 /* 바깥 여백 손잡이는 가운데 손잡이와 구분되게 호박색 */
 .cde-edge::after { background: #f59e0b; }
 .cde-edge { z-index: 42; }
+/* 표 행 경계 */
+.cde-row::after { background: #0d9488; }
+.cde-row { z-index: 44; }
 .cde-handle[data-cde-axis="x"] { cursor: col-resize; width: 26px; }
 .cde-handle[data-cde-axis="x"]::after { width: 6px; border-radius: 3px; }
 .cde-handle[data-cde-axis="y"] { cursor: row-resize; height: 26px; }
