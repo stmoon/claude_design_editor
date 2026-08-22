@@ -317,6 +317,11 @@
       [...table.querySelectorAll('tbody tr')].forEach((tr) => {
         out.push({ kind: 'trow', host: body, target: table, row: tr, axis: 'y' });
       });
+      // Column boundaries, one per gap between the header cells.
+      const cells = headCells(table);
+      for (let i = 0; i < cells.length - 1; i++) {
+        out.push({ kind: 'tcol', host: body, target: table, index: i, axis: 'x' });
+      }
     });
 
     // Boundaries between the media cells themselves - figure/figure, figure/table.
@@ -366,7 +371,8 @@
         const h = doc.createElement('div');
         h.className = 'cde-handle'
           + (sp.kind === 'pad' ? ' cde-edge' : '')
-          + (sp.kind === 'trow' ? ' cde-row' : '');
+          + (sp.kind === 'trow' ? ' cde-row' : '')
+          + (sp.kind === 'tcol' ? ' cde-col-h' : '');
         h.setAttribute('data-cde-ui', '');
         h.dataset.cdeH = String(i);
         h.dataset.cdeAxis = sp.axis;
@@ -378,6 +384,18 @@
       const h = sp.host.querySelector(`:scope > .cde-handle[data-cde-h="${i}"]`);
       if (!h) return;
       let at;
+      if (sp.kind === 'tcol') {
+        const hb = sp.host.getBoundingClientRect();
+        const tb = sp.target.getBoundingClientRect();
+        const cell = headCells(sp.target)[sp.index];
+        if (!cell) return;
+        const cr = cell.getBoundingClientRect();
+        h.style.cssText =
+          `left:${(cr.right - hb.left) / scale - 13}px;` +
+          `top:${(tb.top - hb.top) / scale}px;` +
+          `width:26px;height:${tb.height / scale}px`;
+        return;
+      }
       if (sp.kind === 'trow') {
         const hb = sp.host.getBoundingClientRect();
         const rr = sp.row.getBoundingClientRect();
@@ -390,6 +408,8 @@
       }
       if (sp.kind === 'trow') {
         resizeRows(sp, ev.clientY);
+      } else if (sp.kind === 'tcol') {
+        resizeCols(sp, ev.clientX);
       } else if (sp.kind === 'pad') {
         const cs = getComputedStyle(sp.host);
         const pad = parseFloat(cs[sp.prop]) || 0;
@@ -441,6 +461,46 @@
       list.map((v) => (v / total * list.length).toFixed(4) + 'fr').join(' '));
   }
 
+  // The header row defines the columns; without a thead the first row does.
+  function headCells(table) {
+    const row = table.querySelector('thead tr') || table.querySelector('tr');
+    return row ? [...row.children] : [];
+  }
+
+  // Column widths live in a <colgroup>, which survives saving and printing.
+  function ensureColgroup(table, n) {
+    let cg = table.querySelector(':scope > colgroup');
+    if (cg && cg.children.length === n) return cg;
+    cg?.remove();
+    cg = table.ownerDocument.createElement('colgroup');
+    for (let i = 0; i < n; i++) cg.appendChild(table.ownerDocument.createElement('col'));
+    table.insertBefore(cg, table.firstChild);
+    return cg;
+  }
+
+  function resizeCols(sp, clientX) {
+    const table = sp.target;
+    const cells = headCells(table);
+    if (cells.length < 2) return;
+    const scale = scaleOf();
+    const widths = cells.map((c) => c.getBoundingClientRect().width / scale);
+    const total = widths.reduce((a, b) => a + b, 0) || 1;
+    const i = sp.index;
+    const before = widths.slice(0, i).reduce((a, b) => a + b, 0);
+    const pair = widths[i] + widths[i + 1];
+    const min = Math.min(pair / 2, Math.max(60, total * 0.08));
+    let w = (clientX - table.getBoundingClientRect().left) / scale - before;
+    w = Math.max(min, Math.min(pair - min, w));
+    widths[i] = w;
+    widths[i + 1] = pair - w;
+    const cg = ensureColgroup(table, widths.length);
+    [...cg.children].forEach((col, k) => {
+      col.style.width = (widths[k] / total * 100).toFixed(2) + '%';
+    });
+    // Auto layout ignores <col> widths once content is wider than the track.
+    table.setAttribute('data-cde-fixed', '');
+  }
+
   // Drag any row boundary: the rows above it share the change, so one drag
   // resizes the whole table evenly.
   const ROW_MIN = 2, ROW_MAX = 60;
@@ -478,6 +538,8 @@
       const full = (sp.axis === 'x' ? hb.width : hb.height) / scale;
       if (sp.kind === 'trow') {
         resizeRows(sp, ev.clientY);
+      } else if (sp.kind === 'tcol') {
+        resizeCols(sp, ev.clientX);
       } else if (sp.kind === 'pad') {
         const want = sp.side === 'start' ? inner * full : full - inner * full;
         sp.host.style[sp.prop] = Math.max(0, Math.min(full * 0.4, want)).toFixed(0) + 'px';

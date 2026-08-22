@@ -34,6 +34,9 @@ html[data-cde="stage"] [data-cde-slide][data-cde-current] {
 /* 표 행 경계 */
 .cde-row::after { background: #0d9488; }
 .cde-row { z-index: 44; }
+/* 표 열 경계 */
+.cde-col-h::after { background: #7c3aed; }
+.cde-col-h { z-index: 45; }
 .cde-handle[data-cde-axis="x"] { cursor: col-resize; width: 26px; }
 .cde-handle[data-cde-axis="x"]::after { width: 6px; border-radius: 3px; }
 .cde-handle[data-cde-axis="y"] { cursor: row-resize; height: 26px; }
