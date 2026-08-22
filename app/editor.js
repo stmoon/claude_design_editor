@@ -255,13 +255,18 @@
     const rl = rdoc() && slides(rdoc());
     if (rl) rl.forEach((s, i) => s.toggleAttribute('data-cde-current', i === current));
     rl?.[current]?.parentElement?.scrollIntoView({ block: 'nearest' });
-    // Redrawing the chrome must never be able to block navigation.
+    // Redrawing the chrome must never be able to block navigation, and a
+    // failure in one part must not leave the toolbar describing another slide.
     try {
       fit();
       mountTools();
-      syncToolbar();
     } catch (err) {
       say('편집 도구 표시 실패 - ' + err.message, 'bad');
+      console.error(err);
+    }
+    try {
+      syncToolbar();
+    } catch (err) {
       console.error(err);
     }
   }
@@ -905,7 +910,9 @@
 
   // --- chrome wiring ----------------------------------------------------------
   bar.addEventListener('click', (e) => {
-    const act = e.target.dataset.act;
+    // closest, not e.target: buttons with an icon or a label span inside would
+    // otherwise report the span, whose dataset carries no action.
+    const act = e.target.closest('[data-act]')?.dataset.act;
     if (act === 'pick') { const m = $('layMenu'); m.hidden = !m.hidden; }
     if (act === 'save') save();
     if (act === 'saveas') saveAs();
