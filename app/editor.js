@@ -252,7 +252,10 @@
     current = Math.max(0, Math.min(index, list.length - 1));
     list.forEach((s, i) => s.toggleAttribute('data-cde-current', i === current));
     const rl = rdoc() && slides(rdoc());
-    if (rl) rl.forEach((s, i) => s.toggleAttribute('data-cde-current', i === current));
+    if (rl) rl.forEach((s, i) => {
+      s.toggleAttribute('data-cde-current', i === current);
+      s.parentElement?.toggleAttribute('data-cde-current', i === current);
+    });
     rl?.[current]?.parentElement?.scrollIntoView({ block: 'nearest' });
     // Redrawing the chrome must never be able to block navigation, and a
     // failure in one part must not leave the toolbar describing another slide.
@@ -739,6 +742,94 @@
     bar.querySelector('[data-act="undo"]').disabled = !undoStack.length;
   }
 
+  // Page numbers are baked into each slide, so a reorder has to rewrite them.
+  // Frame slides (목차 / 정리) carry an empty foot-num and stay unnumbered.
+  function renumber() {
+    const numbered = slides(sdoc()).filter((s) => {
+      const n = s.querySelector('.foot-num');
+      return n && n.textContent.trim() !== '';
+    });
+    const total = String(numbered.length).padStart(2, '0');
+    numbered.forEach((s, i) => {
+      const page = String(i + 1).padStart(2, '0');
+      const folio = s.querySelector('.folio');
+      if (folio) folio.textContent = page;
+      s.querySelector('.foot-num').textContent = page + ' / ' + total;
+      const bar = s.querySelector('.bar > i');
+      if (bar) bar.style.width = Math.round((i + 1) / numbered.length * 100) + '%';
+    });
+  }
+
+  function moveSlide(from, to) {
+    if (from === to || from < 0 || to < 0) return;
+    pushUndo();
+    const ss = slides(sdoc());
+    const host = ss[0].parentElement;
+    host.insertBefore(ss[from], to > from ? ss[to].nextSibling : ss[to]);
+
+    const thumbs = [...rdoc().querySelectorAll('.cde-thumb')];
+    const rhost = thumbs[0].parentElement;
+    rhost.insertBefore(thumbs[from], to > from ? thumbs[to].nextSibling : thumbs[to]);
+
+    slides(sdoc()).forEach((s, i) => { s.dataset.cdeSlide = String(i); });
+    slides(rdoc()).forEach((s, i) => { s.dataset.cdeSlide = String(i); });
+    renumber();
+    layoutRail();
+    select(to);
+    markDirty('순서 변경 - 저장 대기');
+  }
+
+  // Drag a thumbnail to move the slide. A plain click still selects.
+  let dragFrom = -1, dragMoved = false;
+  function initReorder(doc) {
+    const drop = doc.createElement('div');
+    drop.className = 'cde-drop';
+    drop.setAttribute('data-cde-ui', '');
+    drop.style.display = 'none';
+    doc.body.appendChild(drop);
+    let target = -1;
+
+    doc.addEventListener('pointerdown', (e) => {
+      const thumb = e.target.closest?.('.cde-thumb');
+      if (!thumb || e.button !== 0) return;
+      dragFrom = [...doc.querySelectorAll('.cde-thumb')].indexOf(thumb);
+      dragMoved = false;
+      target = dragFrom;
+      const startY = e.clientY;
+
+      const move = (ev) => {
+        if (!dragMoved && Math.abs(ev.clientY - startY) < 6) return;
+        if (!dragMoved) { dragMoved = true; thumb.setAttribute('data-cde-drag', ''); }
+        const list = [...doc.querySelectorAll('.cde-thumb')];
+        target = list.length - 1;
+        for (let i = 0; i < list.length; i++) {
+          const r = list[i].getBoundingClientRect();
+          if (ev.clientY < r.top + r.height / 2) { target = i; break; }
+        }
+        const at = list[Math.min(target, list.length - 1)];
+        drop.style.display = 'block';
+        drop.style.left = at.offsetLeft + 'px';
+        drop.style.width = at.offsetWidth + 'px';
+        drop.style.top = (target > dragFrom ? at.offsetTop + at.offsetHeight + 4
+                                            : at.offsetTop - 8) + 'px';
+      };
+      const up = () => {
+        doc.removeEventListener('pointermove', move);
+        doc.removeEventListener('pointerup', up);
+        drop.style.display = 'none';
+        thumb.removeAttribute('data-cde-drag');
+        if (dragMoved) {
+          const to = target > dragFrom ? target - 1 : target;
+          moveSlide(dragFrom, Math.max(0, to));
+        }
+        dragFrom = -1;
+        setTimeout(() => { dragMoved = false; }, 0);
+      };
+      doc.addEventListener('pointermove', move);
+      doc.addEventListener('pointerup', up);
+    });
+  }
+
   // --- rail ----------------------------------------------------------------
   function initRail() {
     const doc = rdoc();
@@ -754,10 +845,12 @@
       const thumb = e.target.closest?.('.cde-thumb');
       if (!thumb) return;
       const list = [...doc.querySelectorAll('.cde-thumb')];
+      if (dragMoved) return;          // 방금 끌어 옮긴 것은 선택이 아니다
       const at = list.indexOf(thumb);
       if (at >= 0) select(at);
     });
     doc.addEventListener('keydown', shortcuts);
+    initReorder(doc);
     layoutRail();
     doc.defaultView.addEventListener('resize', layoutRail);
     new ResizeObserver(layoutRail).observe(document.getElementById('railPane'));

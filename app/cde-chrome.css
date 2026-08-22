@@ -93,16 +93,32 @@ html[data-cde="rail"], html[data-cde="rail"] body {
 html[data-cde="rail"] body {
   display: block !important; padding: 10px; overflow-y: auto; height: 100vh;
 }
+html[data-cde="rail"] body { position: relative; }
 html[data-cde="rail"] [data-cde-slide] {
   display: flex !important;
   transform-origin: 0 0;
-  margin: 0 0 10px;
+  margin: 0;
   box-shadow: 0 1px 4px rgba(15, 23, 42, 0.18);
-  outline: 2px solid transparent;
-  cursor: pointer;
 }
-html[data-cde="rail"] [data-cde-slide][data-cde-current] { outline-color: #2563eb; }
-html[data-cde="rail"] .cde-thumb { position: relative; margin: 0 0 10px; }
+/* 선택 표시는 축소되지 않는 썸네일 쪽에 둔다. 슬라이드에 걸면 scale 때문에
+   3px 테두리가 0.3px 로 줄어 보이지 않는다. */
+html[data-cde="rail"] .cde-thumb {
+  position: relative; margin: 0 0 14px; cursor: grab;
+  border-radius: 3px;
+  outline: 3px solid transparent; outline-offset: 3px;
+  transition: outline-color 0.12s;
+}
+html[data-cde="rail"] .cde-thumb:hover { outline-color: rgba(37, 99, 235, 0.35); }
+html[data-cde="rail"] .cde-thumb[data-cde-current] {
+  outline-color: #2563eb;
+  box-shadow: 0 0 0 5px rgba(37, 99, 235, 0.16);
+}
+html[data-cde="rail"] .cde-thumb[data-cde-drag] { cursor: grabbing; opacity: 0.5; }
+/* 끌어 놓을 자리 */
+html[data-cde="rail"] .cde-drop {
+  position: absolute; height: 4px; border-radius: 2px;
+  background: #2563eb; z-index: 20; pointer-events: none;
+}
 html[data-cde="rail"] .cde-thumb > [data-cde-slide] { position: absolute; top: 0; left: 0; margin: 0; }
 html[data-cde="rail"] .cde-no {
   position: absolute; right: 4px; bottom: 4px; z-index: 5;
