@@ -7,13 +7,14 @@
 
 .body[data-cde-layout] {
   display: grid;
-  gap: var(--cde-gap, 40px);
+  gap: var(--cde-gap, 28px);
   flex: 1 1 auto;
   min-height: 0;
   align-content: stretch;
 }
 .body[data-cde-layout] > .cde-text,
-.body[data-cde-layout] > .cde-media { min-width: 0; min-height: 0; }
+.body[data-cde-layout] > .cde-media,
+.body[data-cde-layout] > .cde-col { min-width: 0; min-height: 0; }
 
 /* --cde-a sizes the first track. The editor's drag handle writes it inline. */
 .body[data-cde-layout="bottom"],
@@ -26,6 +27,18 @@
   grid-template-columns: var(--cde-a, 1fr) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
 }
+/* Two columns, each stacking its own text over its own figure. */
+.body[data-cde-layout="quad"] {
+  grid-template-columns: var(--cde-a, 1fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+.cde-col {
+  display: grid;
+  gap: var(--cde-gap, 24px);
+  grid-template-rows: var(--cde-row, auto) minmax(0, 1fr);
+}
+.cde-col > * { min-width: 0; min-height: 0; }
+
 .body[data-cde-layout="text"],
 .body[data-cde-layout="media"] {
   grid-template-columns: minmax(0, 1fr);
@@ -45,13 +58,19 @@
 .body[data-cde-layout="text"] > .cde-media,
 .body[data-cde-layout="media"] > .cde-text { display: none; }
 
-.cde-text { display: flex; flex-direction: column; gap: 18px; }
+/* Side by side means both columns start at the top edge. Areas still stretch
+ * to the full row so figures can use the height; the content packs upward. */
+.body[data-cde-layout] > * { align-self: stretch; }
+.cde-text {
+  display: flex; flex-direction: column; gap: 18px;
+  justify-content: flex-start; align-content: start;
+}
 .cde-text > * { margin-top: 0; margin-bottom: 0; }
 
 /* Every figure gets an equal cell, so rows and columns stay aligned. */
 .cde-media {
   display: grid;
-  gap: var(--cde-fgap, 20px);
+  gap: var(--cde-fgap, 44px);
   grid-template-columns: repeat(var(--cde-cols, 1), minmax(0, 1fr));
   grid-auto-rows: minmax(0, 1fr);
   align-items: stretch;
@@ -66,4 +85,4 @@
   width: 100%; height: 100%; max-width: 100%; max-height: 100%;
   object-fit: contain;
 }
-.cde-media > table, .cde-media > .tbl { align-self: start; width: 100%; }
+.cde-media > table, .cde-media > .tbl { width: 100%; }

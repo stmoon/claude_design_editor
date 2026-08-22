@@ -10,8 +10,9 @@
   const statusEl = $('status');
 
   // Wrappers from hand-written decks that the layout model replaces.
-  const UNWRAP = '.cols, .cols-fig, .col-text, .fig-stack, .cde-text, .cde-media';
-  const LAYOUTS = ['bottom', 'right', 'left', 'top', 'text', 'media'];
+  const UNWRAP = '.cols, .cols-fig, .col-text, .fig-stack, .cde-text, .cde-media, .cde-col';
+  const LAYOUTS = ['bottom', 'right', 'left', 'top', 'quad', 'text', 'media'];
+  const notUI = (el) => !el.hasAttribute('data-cde-ui');
 
   let cfg = null, deckName = '', current = 0, dirty = false;
   let lastMtime = 0, saveTimer = null, pendingInsert = null;
@@ -26,9 +27,9 @@
     if (tone) statusEl.dataset.tone = tone; else delete statusEl.dataset.tone;
   }
 
-  function markDirty() {
+  function markDirty(msg) {
     dirty = true;
-    say('수정됨 - 저장 대기', 'warn');
+    say(msg || '수정됨 - 저장 대기', 'warn');
     clearTimeout(saveTimer);
     if ($('autosave').checked) saveTimer = setTimeout(() => save(), 1200);
     syncRailSoon();
@@ -80,6 +81,20 @@
 
     doc.querySelectorAll(cfg.editable).forEach((el) => el.setAttribute('contenteditable', 'true'));
     doc.addEventListener('input', (e) => { if (e.target.isContentEditable) markDirty(); });
+
+    // Click picks an item; Del removes it. Text keeps normal editing behaviour,
+    // so Esc is what steps out of a block before deleting it.
+    doc.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('[data-cde-ui]')) return;
+      selectItem(e.target.closest(DELETABLE));
+    });
+    doc.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { doc.activeElement?.blur?.(); return; }
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      if (doc.activeElement && doc.activeElement.isContentEditable) return;
+      const item = doc.querySelector('[data-cde-sel]');
+      if (item) { e.preventDefault(); removeItem(item); }
+    });
     doc.defaultView.addEventListener('resize', fit);
     new ResizeObserver(fit).observe(document.getElementById('stagePane'));
     fetch('/_stat?path=' + encodeURIComponent(deckName))
@@ -119,32 +134,69 @@
     return { media, text };
   }
 
+  const gridOf = (body) =>
+    body.querySelector(':scope > .cols-fig, :scope > .cols, :scope > .cols-wide, :scope > .cols3');
+  const isMedia = (el) => el.matches(cfg.media) || !!el.querySelector(cfg.media);
+
   function guessLayout(body) {
-    if (body.querySelector('.cols-fig.flip, .cols.flip')) return 'left';
-    if (body.querySelector('.cols-fig, .cols')) return 'right';
-    return 'bottom';
+    const grid = gridOf(body);
+    // A side-by-side grid only means "text beside media" if it holds a text
+    // column. Bullets above a two-figure row are a stack, not a split.
+    if (!grid || ![...grid.children].some((c) => !isMedia(c))) return 'bottom';
+    return grid.classList.contains('flip') ? 'left' : 'right';
+  }
+
+  // Columns come from how the deck already arranged its media, not from a count:
+  // a table forced into half a slide is unreadable.
+  function guessCols(body) {
+    if (body.querySelector('.fig-stack.row')) return '2';
+    const grid = gridOf(body);
+    if (grid) {
+      const n = [...grid.children].filter(isMedia).length;
+      if (n >= 2 && ![...grid.children].some((c) => !isMedia(c))) return String(Math.min(n, 3));
+    }
+    return '1';
+  }
+
+  function box(doc, cls, items) {
+    const el = doc.createElement('div');
+    el.className = cls;
+    items.forEach((i) => el.appendChild(i));
+    return el;
+  }
+
+  function column(doc, texts, media, cols) {
+    const col = doc.createElement('div');
+    col.className = 'cde-col';
+    col.appendChild(box(doc, 'cde-text', texts));
+    const m = box(doc, 'cde-media', media);
+    m.style.setProperty('--cde-cols', cols);
+    col.appendChild(m);
+    return col;
   }
 
   function normalize(slide, layout) {
     const body = slide.querySelector(cfg.body);
     if (!body) return;
-    const name = layout || body.dataset.cdeLayout || guessLayout(body);
-    const { media, text } = collect(body);
     const doc = slide.ownerDocument;
+    let name = layout || body.dataset.cdeLayout || guessLayout(body);
+    const { media, text } = collect(body);
+    const cols = body.style.getPropertyValue('--cde-cols') || guessCols(body);
+    if (!media.length && name !== 'text') name = 'text';
 
-    const textBox = doc.createElement('div');
-    textBox.className = 'cde-text';
-    text.forEach((el) => textBox.appendChild(el));
-    const mediaBox = doc.createElement('div');
-    mediaBox.className = 'cde-media';
-    media.forEach((el) => mediaBox.appendChild(el));
-
-    body.replaceChildren(textBox, mediaBox);
-    body.dataset.cdeLayout = media.length ? name : 'text';
-    if (!body.style.getPropertyValue('--cde-cols')) {
-      body.style.setProperty('--cde-cols', String(media.length > 1 ? 2 : 1));
+    if (name === 'quad') {
+      // Two columns, each stacking its own text over its own media.
+      const half = (a) => [a.slice(0, Math.ceil(a.length / 2)), a.slice(Math.ceil(a.length / 2))];
+      const [t1, t2] = half(text), [m1, m2] = half(media);
+      body.replaceChildren(column(doc, t1, m1, cols), column(doc, t2, m2, cols));
+    } else {
+      const textBox = box(doc, 'cde-text', text);
+      const mediaBox = box(doc, 'cde-media', media);
+      mediaBox.style.setProperty('--cde-cols', cols);
+      body.replaceChildren(textBox, mediaBox);
     }
-    mediaBox.style.setProperty('--cde-cols', body.style.getPropertyValue('--cde-cols'));
+    body.dataset.cdeLayout = name;
+    body.style.setProperty('--cde-cols', cols);
   }
 
   function currentSlide() { return slides(sdoc())[current] || null; }
@@ -180,73 +232,94 @@
     const { w, h } = slideSize(slide);
     const k = Math.min((pane.width - 48) / w, (pane.height - 48) / h);
     doc.documentElement.style.setProperty('--cde-scale', String(k));
-    placeHandle();
+    placeHandles();
   }
 
-  // --- in-slide split handle ---------------------------------------------
-  function placeHandle() {
+  // --- in-slide split handles -------------------------------------------
+  // A layout can have more than one adjustable boundary; quad has three.
+  function splitsOf(body) {
+    const name = body.dataset.cdeLayout;
+    const kids = (el) => [...el.children].filter(notUI);
+    const byOrder = (a, b) => (getComputedStyle(a).order | 0) - (getComputedStyle(b).order | 0);
+    if (['bottom', 'top', 'left', 'right'].includes(name)) {
+      const [a, b] = kids(body).sort(byOrder);
+      const axis = (name === 'left' || name === 'right') ? 'x' : 'y';
+      return a && b ? [{ host: body, axis, prop: '--cde-a', a, b }] : [];
+    }
+    if (name === 'quad') {
+      const cols = kids(body);
+      const out = [];
+      if (cols.length === 2) out.push({ host: body, axis: 'x', prop: '--cde-a', a: cols[0], b: cols[1] });
+      cols.forEach((col) => {
+        const [a, b] = kids(col);
+        if (a && b) out.push({ host: col, axis: 'y', prop: '--cde-row', a, b });
+      });
+      return out;
+    }
+    return [];
+  }
+
+  let splits = [], dragging = false;
+
+  function placeHandles() {
     const doc = sdoc();
     const body = currentBody();
-    const name = body?.dataset.cdeLayout;
-    if (!body || !['bottom', 'top', 'left', 'right'].includes(name)) {
-      doc.querySelectorAll('.cde-handle').forEach((el) => el.remove());
-      return;
-    }
-    const [first, second] = [...body.children]
-      .filter((el) => !el.classList.contains('cde-handle'))
-      .sort((a, b) => (getComputedStyle(a).order | 0) - (getComputedStyle(b).order | 0));
-    if (!first || !second) return;
-
-    const axis = (name === 'left' || name === 'right') ? 'x' : 'y';
-    // Reused across moves: rebuilding mid-drag would drop the live listeners.
-    let handle = body.querySelector(':scope > .cde-handle');
-    if (!handle) {
-      doc.querySelectorAll('.cde-handle').forEach((el) => el.remove());
-      handle = doc.createElement('div');
-      handle.className = 'cde-handle';
-      handle.setAttribute('data-cde-ui', '');
-      handle.addEventListener('pointerdown', startDrag);
-      body.appendChild(handle);
-    }
-    handle.dataset.cdeAxis = axis;
-
-    const bb = body.getBoundingClientRect();
-    const fb = first.getBoundingClientRect(), sb = second.getBoundingClientRect();
+    if (!dragging) splits = body ? splitsOf(body) : [];
     const scale = parseFloat(doc.documentElement.style.getPropertyValue('--cde-scale')) || 1;
-    if (axis === 'x') {
-      const mid = (fb.right + sb.left) / 2;
-      handle.style.cssText = `left:${(mid - bb.left) / scale - 13}px;top:0;height:100%;width:26px`;
-    } else {
-      const mid = (fb.bottom + sb.top) / 2;
-      handle.style.cssText = `top:${(mid - bb.top) / scale - 13}px;left:0;width:100%;height:26px`;
+
+    if (!dragging) {
+      doc.querySelectorAll('.cde-handle').forEach((el) => el.remove());
+      splits.forEach((sp, i) => {
+        const h = doc.createElement('div');
+        h.className = 'cde-handle';
+        h.setAttribute('data-cde-ui', '');
+        h.dataset.cdeH = String(i);
+        h.dataset.cdeAxis = sp.axis;
+        h.addEventListener('pointerdown', startDrag);
+        sp.host.appendChild(h);
+      });
     }
+    splits.forEach((sp, i) => {
+      const h = sp.host.querySelector(`:scope > .cde-handle[data-cde-h="${i}"]`);
+      if (!h) return;
+      const hb = sp.host.getBoundingClientRect();
+      const ab = sp.a.getBoundingClientRect(), bb = sp.b.getBoundingClientRect();
+      if (sp.axis === 'x') {
+        const mid = (ab.right + bb.left) / 2;
+        h.style.cssText = `left:${(mid - hb.left) / scale - 13}px;top:0;height:100%;width:26px`;
+      } else {
+        const mid = (ab.bottom + bb.top) / 2;
+        h.style.cssText = `top:${(mid - hb.top) / scale - 13}px;left:0;width:100%;height:26px`;
+      }
+    });
   }
 
   function startDrag(e) {
     e.preventDefault();
     const handle = e.currentTarget;
-    const body = currentBody();
-    if (!body) return;
+    const sp = splits[Number(handle.dataset.cdeH)];
+    if (!sp) return;
     const doc = handle.ownerDocument;
     // Capture keeps a real pointer glued to the handle; synthetic events have
     // no active pointer, so a failure here is not fatal.
     try { handle.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
     handle.dataset.cdeDrag = '';
-    const axis = handle.dataset.cdeAxis;
+    dragging = true;
 
     // Listeners sit on the document so the drag survives leaving the handle.
     const move = (ev) => {
-      const bb = body.getBoundingClientRect();
-      const raw = axis === 'x'
-        ? (ev.clientX - bb.left) / bb.width
-        : (ev.clientY - bb.top) / bb.height;
-      body.style.setProperty('--cde-a', Math.max(12, Math.min(88, raw * 100)).toFixed(1) + '%');
-      placeHandle();
+      const hb = sp.host.getBoundingClientRect();
+      const raw = sp.axis === 'x'
+        ? (ev.clientX - hb.left) / hb.width
+        : (ev.clientY - hb.top) / hb.height;
+      sp.host.style.setProperty(sp.prop, Math.max(12, Math.min(88, raw * 100)).toFixed(1) + '%');
+      placeHandles();
     };
     const up = () => {
       doc.removeEventListener('pointermove', move);
       doc.removeEventListener('pointerup', up);
       delete handle.dataset.cdeDrag;
+      dragging = false;
       markDirty();
     };
     doc.addEventListener('pointermove', move);
@@ -254,42 +327,85 @@
   }
 
   // --- figure tools -------------------------------------------------------
+  const DELETABLE = '.cde-media > *, .cde-text > *, .cde-text li';
+
+  // Removing a figure has to undo what adding it did, or the survivor keeps
+  // the half-width cell the pair needed.
+  function removeItem(item) {
+    if (!item || item.hasAttribute('data-cde-ui')) return;
+    const mbox = item.parentElement?.closest('.cde-media');
+    item.remove();
+    if (mbox) {
+      const left = [...mbox.children].filter(notUI).length;
+      const cols = Number(mbox.style.getPropertyValue('--cde-cols')) || 1;
+      if (left < cols) setCols(Math.max(1, left));
+    }
+    const body = currentBody();
+    if (body && !body.querySelector('.cde-media > *')) {
+      body.style.removeProperty('--cde-a');
+      body.querySelectorAll('.cde-col').forEach((c) => c.style.removeProperty('--cde-row'));
+    }
+    normalize(currentSlide(), body?.dataset.cdeLayout);
+    select(current);
+    markDirty('삭제됨 - 저장 대기');
+  }
+
+  function selectItem(item) {
+    sdoc().querySelectorAll('[data-cde-sel]').forEach((el) => el.removeAttribute('data-cde-sel'));
+    if (item) item.setAttribute('data-cde-sel', '');
+  }
+
+  function delButton(doc, item, small) {
+    const b = doc.createElement('button');
+    b.type = 'button';
+    b.className = 'cde-del' + (small ? ' cde-del-sm' : '');
+    b.textContent = '\u00d7';
+    b.title = '이 항목 삭제 (Del)';
+    b.contentEditable = 'false';
+    b.setAttribute('data-cde-ui', '');
+    b.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      removeItem(item);
+    });
+    item.appendChild(b);
+    return b;
+  }
+
   function mountTools() {
     const doc = sdoc();
     doc.querySelectorAll('.cde-plus, .cde-del').forEach((el) => el.remove());
-    const box = currentBody()?.querySelector('.cde-media');
-    if (!box) return;
-    [...box.children].forEach((item, index) => {
-      if (item.hasAttribute('data-cde-ui')) return;
-      [['left', '+'], ['right', '+'], ['top', '+'], ['bottom', '+']].forEach(([side, glyph]) => {
-        const b = doc.createElement('button');
-        b.type = 'button'; b.className = 'cde-plus'; b.textContent = glyph;
-        b.dataset.cdeSide = side;
-        b.setAttribute('data-cde-ui', '');
-        b.title = { left: '왼쪽에 그림 추가', right: '오른쪽에 그림 추가',
-                    top: '위에 그림 추가', bottom: '아래에 그림 추가' }[side];
-        b.addEventListener('click', (e) => {
-          e.preventDefault(); e.stopPropagation();
-          askImage(index, side);
-        });
-        item.appendChild(b);
+    const body = currentBody();
+    if (!body) return;
+
+    body.querySelectorAll('.cde-media').forEach((mbox) => {
+      [...mbox.children].filter(notUI).forEach((item, index) => {
+        [['left', '왼쪽'], ['right', '오른쪽'], ['top', '위'], ['bottom', '아래']]
+          .forEach(([side, label]) => {
+            const b = doc.createElement('button');
+            b.type = 'button'; b.className = 'cde-plus'; b.textContent = '+';
+            b.dataset.cdeSide = side;
+            b.title = label + '에 그림 추가';
+            b.contentEditable = 'false';
+            b.setAttribute('data-cde-ui', '');
+            b.addEventListener('click', (e) => {
+              e.preventDefault(); e.stopPropagation();
+              askImage(mbox, index, side);
+            });
+            item.appendChild(b);
+          });
+        delButton(doc, item);
       });
-      const del = doc.createElement('button');
-      del.type = 'button'; del.className = 'cde-del'; del.textContent = '×';
-      del.title = '이 그림 삭제';
-      del.setAttribute('data-cde-ui', '');
-      del.addEventListener('click', (e) => {
-        e.preventDefault(); e.stopPropagation();
-        item.remove();
-        normalize(currentSlide(), currentBody().dataset.cdeLayout);
-        select(current); markDirty();
-      });
-      item.appendChild(del);
     });
+
+    // Any block, and any bullet, can be removed - not just figures.
+    body.querySelectorAll('.cde-text').forEach((tbox) => {
+      [...tbox.children].filter(notUI).forEach((item) => delButton(doc, item));
+    });
+    body.querySelectorAll('.ul > li, .cde-text li').forEach((li) => delButton(doc, li, true));
   }
 
-  function askImage(index, side) {
-    pendingInsert = { index, side };
+  function askImage(mbox, index, side) {
+    pendingInsert = { mbox, index, side };
     fileInput.value = '';
     fileInput.click();
   }
@@ -308,8 +424,14 @@
     const doc = sdoc();
     const body = currentBody();
     if (!body) return;
-    let box = body.querySelector('.cde-media');
-    if (!box) { normalize(currentSlide(), 'bottom'); box = currentBody().querySelector('.cde-media'); }
+    const where = pendingInsert;
+    pendingInsert = null;
+
+    let mbox = where?.mbox;
+    if (!mbox || !body.contains(mbox)) {
+      if (!body.querySelector('.cde-media')) normalize(currentSlide(), 'bottom');
+      mbox = currentBody().querySelector('.cde-media');
+    }
 
     const fig = doc.createElement('figure');
     fig.className = 'fig';
@@ -319,11 +441,10 @@
     img.src = src; img.alt = alt || '';
     frame.appendChild(img); fig.appendChild(frame);
 
-    const items = [...box.children].filter((el) => !el.hasAttribute('data-cde-ui'));
-    let cols = Number(box.style.getPropertyValue('--cde-cols')) || 1;
-    const where = pendingInsert;
+    const items = [...mbox.children].filter(notUI);
+    let cols = Number(mbox.style.getPropertyValue('--cde-cols')) || 1;
     let at = items.length;
-    if (where) {
+    if (where && where.index !== null) {
       const i = where.index;
       if (where.side === 'left') at = i;
       if (where.side === 'right') at = i + 1;
@@ -332,11 +453,10 @@
       // A side-by-side insert only reads as side-by-side with a second column.
       if ((where.side === 'left' || where.side === 'right') && cols === 1) cols = 2;
     }
-    pendingInsert = null;
 
-    box.insertBefore(fig, items[at] || null);
+    mbox.insertBefore(fig, items[at] || null);
     setCols(cols);
-    if (body.dataset.cdeLayout === 'text') body.dataset.cdeLayout = 'bottom';
+    if (currentBody().dataset.cdeLayout === 'text') currentBody().dataset.cdeLayout = 'bottom';
     select(current);
     markDirty();
     say('그림 추가 - ' + src, 'ok');
@@ -347,7 +467,7 @@
     if (!body) return;
     const value = String(Math.max(1, Math.min(6, n)));
     body.style.setProperty('--cde-cols', value);
-    body.querySelector('.cde-media')?.style.setProperty('--cde-cols', value);
+    body.querySelectorAll('.cde-media').forEach((m) => m.style.setProperty('--cde-cols', value));
     $('cols').textContent = value;
   }
 
@@ -427,6 +547,7 @@
     root.removeAttribute('style');
     root.querySelectorAll('[data-cde-ui]').forEach((el) => el.remove());
     root.querySelectorAll('[contenteditable]').forEach((el) => el.removeAttribute('contenteditable'));
+    root.querySelectorAll('[data-cde-sel]').forEach((el) => el.removeAttribute('data-cde-sel'));
     root.querySelectorAll('[data-cde-slide]').forEach((el) => {
       el.removeAttribute('data-cde-slide');
       el.removeAttribute('data-cde-current');
@@ -492,7 +613,7 @@
     const act = e.target.dataset.act;
     if (act === 'save') save();
     if (act === 'saveas') saveAs();
-    if (act === 'add') askImage(null, null);
+    if (act === 'add') askImage(null, null, null);
     if (act === 'cols+') { setCols(Number($('cols').textContent) + 1); markDirty(); }
     if (act === 'cols-') { setCols(Number($('cols').textContent) - 1); markDirty(); }
   });

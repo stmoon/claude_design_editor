@@ -48,6 +48,11 @@ html[data-cde="stage"] [data-cde-slide][data-cde-current] {
 .cde-plus[data-cde-side="right"]  { right: -15px; top: 50%; margin-top: -15px; }
 .cde-plus[data-cde-side="top"]    { top: -15px; left: 50%; margin-left: -15px; }
 .cde-plus[data-cde-side="bottom"] { bottom: -15px; left: 50%; margin-left: -15px; }
+/* Every block and every bullet can be removed, so anything holding a delete
+ * button needs to be a positioning context. */
+[data-cde-edit] .cde-media > *,
+[data-cde-edit] .cde-text > *,
+[data-cde-edit] .cde-text li { position: relative; }
 .cde-del {
   position: absolute; z-index: 45; top: 6px; right: 6px;
   width: 26px; height: 26px; padding: 0; border: 0; border-radius: 50%;
@@ -55,8 +60,14 @@ html[data-cde="stage"] [data-cde-slide][data-cde-current] {
   font: 700 15px/1 'Inter', system-ui, sans-serif;
   opacity: 0; transition: opacity 0.12s;
 }
-.cde-media > *:hover .cde-del { opacity: 1; }
-.cde-del:hover { background: #b91c1c; }
+.cde-del-sm { width: 20px; height: 20px; top: 2px; right: -26px; font-size: 12px; }
+[data-cde-edit] *:hover > .cde-del { opacity: 1; }
+.cde-del:hover { background: #b91c1c; opacity: 1; }
+
+[data-cde-edit] [data-cde-sel] {
+  outline: 3px solid #2563eb !important; outline-offset: 4px; border-radius: 4px;
+}
+[data-cde-edit] [data-cde-sel] > .cde-del { opacity: 1; }
 
 [data-cde-edit] [contenteditable] {
   outline: 1px dashed rgba(37, 99, 235, 0.5); outline-offset: 3px; border-radius: 3px;
