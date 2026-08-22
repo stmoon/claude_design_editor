@@ -7,9 +7,10 @@ html[data-cde="stage"], html[data-cde="stage"] body {
   background: #eef2f7;
 }
 html[data-cde="stage"] body { position: relative; }
-html[data-cde="stage"] [data-cde-slide] { display: none !important; }
+/* 현재 장에는 display 를 지정하지 않는다. 강제하면 덱이 정한 배치를 덮어써
+   방향이 뒤집힌다 - 덱이 flex-direction 이나 grid 를 쓰면 그대로 깨진다. */
+html[data-cde="stage"] [data-cde-slide]:not([data-cde-current]) { display: none !important; }
 html[data-cde="stage"] [data-cde-slide][data-cde-current] {
-  display: flex !important;
   position: absolute; top: 50%; left: 50%;
   transform: translate(-50%, -50%) scale(var(--cde-scale, 1));
   transform-origin: 50% 50%;
@@ -95,7 +96,6 @@ html[data-cde="rail"] body {
 }
 html[data-cde="rail"] body { position: relative; }
 html[data-cde="rail"] [data-cde-slide] {
-  display: flex !important;
   transform-origin: 0 0;
   margin: 0;
   box-shadow: 0 1px 4px rgba(15, 23, 42, 0.18);
