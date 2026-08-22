@@ -4,10 +4,24 @@
 `section.slide` 구조의 HTML 덱이면 어디서든 쓴다.
 
 ```bash
-python3 editor.py /path/to/deck-dir        # 폴더의 첫 HTML 을 연다
+python3 editor.py /path/to/decks           # 하위 폴더까지 뒤져 덱을 모두 찾는다
 python3 editor.py /path/to/deck.html       # 특정 파일을 연다
 python3 editor.py . --port 8770 --no-open
 ```
+
+폴더를 주면 그 아래 모든 `.html` 을 찾아 도구막대 목록에 올린다. 폴더별로 묶여
+나오므로 덱이 여러 폴더에 흩어져 있어도 한 창에서 오간다.
+
+```
+decks/
+  Docker/1-1_Docker.html
+  CMake/1-2_CMake.html      <- 셋 다 목록에 뜬다
+  Network/1-3_Network.html
+```
+
+각 덱의 `deck.css`, `imgs/` 는 그 덱 폴더 기준으로 읽는다. 그림을 올리면 지금
+열려 있는 덱의 `imgs/` 에 저장되고, `다른 이름으로 저장` 도 그 덱과 같은 폴더에 쓴다.
+`_` 로 시작하는 파일과 `node_modules` 같은 폴더는 건너뛰고, 6 단계까지만 내려간다.
 
 브라우저가 `http://127.0.0.1:8770/` 로 열린다. 크롬 기준으로 만들었다.
 파이썬 표준 라이브러리만 쓴다. 설치할 것 없다.

@@ -47,7 +47,8 @@
   const UNDO_MAX = 60;
   let lastMtime = 0, saveTimer = null, pendingInsert = null;
 
-  const deckUrl = (name) => '/deck/' + encodeURIComponent(name);
+  // Deck names are paths now; encode each segment so the slashes survive.
+  const deckUrl = (name) => '/deck/' + name.split('/').map(encodeURIComponent).join('/');
   const sdoc = () => stage.contentDocument;
   const rdoc = () => rail.contentDocument;
   const slides = (doc) => [...doc.querySelectorAll(cfg.slide)];
@@ -71,7 +72,20 @@
     $('autosave').checked = cfg.autosave !== false;
     const { files } = await (await fetch('/_files')).json();
     const sel = $('deck');
-    files.forEach((f) => sel.add(new Option(f, f)));
+    // Group by folder so a tree of decks stays readable in one menu.
+    const byDir = new Map();
+    files.forEach((f) => {
+      const cut = f.lastIndexOf('/');
+      const dir = cut < 0 ? '' : f.slice(0, cut);
+      if (!byDir.has(dir)) byDir.set(dir, []);
+      byDir.get(dir).push(f);
+    });
+    byDir.forEach((list, dir) => {
+      const parent = dir
+        ? sel.appendChild(Object.assign(document.createElement('optgroup'), { label: dir }))
+        : sel;
+      list.forEach((f) => parent.appendChild(new Option(f.split('/').pop(), f)));
+    });
     deckName = cfg.deck && files.includes(cfg.deck) ? cfg.deck : files[0];
     sel.value = deckName;
     sel.addEventListener('change', () => {
@@ -662,7 +676,8 @@
   fileInput.addEventListener('change', async () => {
     const file = fileInput.files && fileInput.files[0];
     if (!file) return;
-    const res = await fetch('/_upload?name=' + encodeURIComponent(file.name),
+    const res = await fetch('/_upload?name=' + encodeURIComponent(file.name)
+                            + '&deck=' + encodeURIComponent(deckName),
                             { method: 'POST', body: file });
     if (!res.ok) { say('업로드 실패', 'bad'); return; }
     const { src } = await res.json();
@@ -968,11 +983,12 @@
   }
 
   async function saveAs() {
-    const suggested = deckName.replace(/\.html?$/i, '') + '-copy.html';
-    const name = prompt('다른 이름으로 저장 (같은 폴더)', suggested);
+    const base = deckName.split('/').pop().replace(/\.html?$/i, '');
+    const name = prompt('다른 이름으로 저장 (같은 폴더)', base + '-copy.html');
     if (!name) return;
     const post = (overwrite) => fetch(
-      '/_saveas?name=' + encodeURIComponent(name) + (overwrite ? '&overwrite=1' : ''),
+      '/_saveas?name=' + encodeURIComponent(name)
+      + '&deck=' + encodeURIComponent(deckName) + (overwrite ? '&overwrite=1' : ''),
       { method: 'POST', headers: { 'Content-Type': 'text/html; charset=utf-8' }, body: serialize() });
     let res = await post(false);
     if (res.status === 409) {

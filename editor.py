@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Claude Design Editor - a local slide editor for static HTML decks.
 
-    python3 editor.py <deck-dir-or-html> [--port 8770] [--no-open]
+    python3 editor.py <dir-or-html> [--port 8770] [--no-open]
 
-Serves the editor UI and the target deck directory over loopback, and writes
-edits straight back to the file on disk. Every write is confined to the target
+Given a directory it finds every deck under it, subdirectories included, and
+lets you switch between them. Given a single .html it opens that one and still
+lists its siblings.
+
+Serves the editor UI and the target tree over loopback, and writes edits
+straight back to the file on disk. Every write is confined to the target
 directory; nothing outside it is reachable.
 """
 
@@ -36,6 +40,9 @@ DEFAULT_CONFIG = {
 }
 
 WRITABLE_SUFFIXES = {'.html', '.htm', '.css', '.js', '.svg', '.md', '.json'}
+# Directories never worth walking into when looking for decks.
+SKIP_DIRS = {'node_modules', '__pycache__', '.well-known'}
+MAX_DEPTH = 6
 IMAGE_SUFFIXES = {'.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.avif'}
 
 TARGET = Path('.')
@@ -51,6 +58,28 @@ def confined(root, url_path):
     return target if target == root or root in target.parents else None
 
 
+def find_decks():
+    """Every deck under the target, as paths relative to it, shallowest first."""
+    out = []
+    root = TARGET.resolve()
+    for path in root.rglob('*.htm*'):
+        rel = path.relative_to(root)
+        if len(rel.parts) > MAX_DEPTH:
+            continue
+        if any(part.startswith('.') or part in SKIP_DIRS for part in rel.parts[:-1]):
+            continue
+        if path.suffix.lower() not in ('.html', '.htm') or path.name.startswith('_'):
+            continue
+        out.append(rel.as_posix())
+    return sorted(out, key=lambda s: (s.count('/'), s.lower()))
+
+
+def deck_dir(rel):
+    """Directory of a deck path, for resolving its images and siblings."""
+    target = confined(TARGET, '/' + rel)
+    return target.parent if target else TARGET.resolve()
+
+
 def load_config():
     cfg = dict(DEFAULT_CONFIG)
     path = TARGET / 'cde.config.json'
@@ -59,7 +88,10 @@ def load_config():
             cfg.update(json.loads(path.read_text(encoding='utf-8')))
         except (ValueError, OSError) as err:
             print(f'cde.config.json 무시: {err}')
-    cfg['deck'] = DECK_FILE.name if DECK_FILE else ''
+    if DECK_FILE:
+        cfg['deck'] = DECK_FILE.resolve().relative_to(TARGET.resolve()).as_posix()
+    else:
+        cfg['deck'] = ''
     return cfg
 
 
@@ -108,7 +140,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/_config':
             return self._json(load_config())
         if path == '/_files':
-            return self._json({'files': sorted(p.name for p in TARGET.glob('*.html'))})
+            return self._json({'files': find_decks()})
         if path == '/_stat':
             target = confined(TARGET, '/' + query.get('path', [''])[0])
             if target is None or not target.is_file():
@@ -147,7 +179,8 @@ class Handler(BaseHTTPRequestHandler):
             data = self._body()
             if data is None:
                 return self._send(400, b'empty body')
-            folder = TARGET / load_config()['imageDir']
+            # Images belong beside the deck being edited, not at the tree root.
+            folder = deck_dir(query.get('deck', [''])[0]) / load_config()['imageDir']
             folder.mkdir(parents=True, exist_ok=True)
             target = folder / name
             # Never clobber an existing figure - park the new file beside it.
@@ -165,12 +198,14 @@ class Handler(BaseHTTPRequestHandler):
             data = self._body()
             if data is None:
                 return self._send(400, b'empty body')
-            target = TARGET / name
+            folder = deck_dir(query.get('deck', [''])[0])
+            target = folder / name
             if target.exists() and query.get('overwrite', ['0'])[0] != '1':
                 return self._json({'exists': True, 'name': name}, 409)
             target.write_bytes(data)
-            print(f'saved as {name} ({len(data)} bytes)', flush=True)
-            return self._json({'ok': True, 'name': name,
+            rel = target.resolve().relative_to(TARGET.resolve()).as_posix()
+            print(f'saved as {rel} ({len(data)} bytes)', flush=True)
+            return self._json({'ok': True, 'name': rel,
                                'mtime': target.stat().st_mtime})
 
         self._send(404, b'not found')
@@ -195,24 +230,29 @@ def main():
         TARGET, DECK_FILE = target.parent, target
     elif target.is_dir():
         TARGET = target
-        html = sorted(TARGET.glob('*.html'))
-        DECK_FILE = html[0] if html else None
+        DECK_FILE = None
     else:
         sys.exit(f'대상이 없다: {target}')
-    if DECK_FILE is None:
-        sys.exit(f'HTML 파일이 없다: {TARGET}')
 
-    # Ship the persistent layout stylesheet next to the deck so saved files
+    decks = find_decks()
+    if not decks:
+        sys.exit(f'HTML 파일이 없다: {TARGET}')
+    if DECK_FILE is None:
+        DECK_FILE = TARGET / decks[0]
+
+    # Ship the persistent layout stylesheet beside every deck, so saved files
     # keep their layout without the editor running.
     layout = APP / 'cde-layout.css'
     if layout.is_file():
-        (TARGET / 'cde-layout.css').write_bytes(layout.read_bytes())
+        for folder in {(TARGET / d).parent for d in decks}:
+            (folder / 'cde-layout.css').write_bytes(layout.read_bytes())
 
     url = f'http://127.0.0.1:{args.port}/'
     with Server(('127.0.0.1', args.port), Handler) as srv:
         print(f'Claude Design Editor  {url}')
         print(f'  대상 : {TARGET}')
-        print(f'  덱   : {DECK_FILE.name}')
+        print(f'  덱   : {len(decks)} 개 - ' + ', '.join(decks[:4])
+              + (' ...' if len(decks) > 4 else ''))
         print('  Ctrl+C 로 종료')
         if not args.no_open:
             threading.Timer(0.6, lambda: webbrowser.open(url)).start()
