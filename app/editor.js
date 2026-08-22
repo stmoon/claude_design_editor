@@ -102,6 +102,9 @@
     // document. Drop its chrome and swallow its shortcuts.
     doc.querySelectorAll('[data-edit-ui]').forEach((el) => el.remove());
     doc.addEventListener('keydown', (e) => {
+      // Only bare E/S belong to the old in-deck editor. Swallowing modified
+      // keys here would have eaten Ctrl+S before our own handler ran.
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (!e.target.isContentEditable && 'eEsS'.includes(e.key)) e.stopImmediatePropagation();
     }, true);
 
@@ -125,12 +128,8 @@
       if (e.target.closest('[data-cde-ui]')) return;
       selectItem(e.target.closest(DELETABLE));
     });
+    doc.addEventListener('keydown', shortcuts);
     doc.addEventListener('keydown', (e) => {
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
-        // Inside a text field the browser's own undo is the better one.
-        if (doc.activeElement && doc.activeElement.isContentEditable) return;
-        e.preventDefault(); undo(); return;
-      }
       if (e.key === 'Escape') { doc.activeElement?.blur?.(); return; }
       if (e.key !== 'Delete' && e.key !== 'Backspace') return;
       if (doc.activeElement && doc.activeElement.isContentEditable) return;
@@ -758,6 +757,7 @@
       const at = list.indexOf(thumb);
       if (at >= 0) select(at);
     });
+    doc.addEventListener('keydown', shortcuts);
     layoutRail();
     doc.defaultView.addEventListener('resize', layoutRail);
     new ResizeObserver(layoutRail).observe(document.getElementById('railPane'));
@@ -909,6 +909,29 @@
   }
 
   // --- chrome wiring ----------------------------------------------------------
+  // Focus lives inside an iframe as soon as a slide is clicked, and key events
+  // do not cross that boundary - so the same handler goes on every document.
+  function shortcuts(e) {
+    const editing = !!(e.target && e.target.isContentEditable);
+    if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+      const k = e.key.toLowerCase();
+      if (k === 's') { e.preventDefault(); save(); return; }
+      if (k === 'z' && !editing) { e.preventDefault(); undo(); return; }
+      return;
+    }
+    if (e.altKey) return;
+    if (e.key === 'PageDown') { e.preventDefault(); select(current + 1); return; }
+    if (e.key === 'PageUp') { e.preventDefault(); select(current - 1); return; }
+    if (e.key === 'Home' && !editing) { e.preventDefault(); select(0); return; }
+    if (e.key === 'End' && !editing) { e.preventDefault(); select(slides(sdoc()).length - 1); return; }
+    if (editing) return;
+    const tag = e.target && e.target.tagName;
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'BUTTON') return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); select(current + 1); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); select(current - 1); }
+  }
+  document.addEventListener('keydown', shortcuts);
+
   bar.addEventListener('click', (e) => {
     // closest, not e.target: buttons with an icon or a label span inside would
     // otherwise report the span, whose dataset carries no action.
@@ -977,14 +1000,6 @@
       document.addEventListener('pointerup', up);
     });
   })();
-
-  document.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) { e.preventDefault(); save(); }
-    if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); undo(); }
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-    if (e.key === 'PageDown' || e.key === 'ArrowDown') { e.preventDefault(); select(current + 1); }
-    if (e.key === 'PageUp' || e.key === 'ArrowUp') { e.preventDefault(); select(current - 1); }
-  });
 
   window.addEventListener('beforeunload', (e) => {
     if (dirty) { e.preventDefault(); e.returnValue = ''; }

@@ -9,6 +9,7 @@
 <header class="bar">
   <strong class="brand">Claude Design Editor</strong>
   <select id="deck" title="열 파일"></select>
+  <span class="keys" title="PageUp / PageDown 슬라이드 이동 · Ctrl+S 저장 · Ctrl+Z 되돌리기">PgUp / PgDn</span>
 
   <span class="sep"></span>
 
@@ -31,7 +32,7 @@
   <span class="sep"></span>
 
   <label class="chk"><input type="checkbox" id="autosave" checked> 자동 저장</label>
-  <button data-act="save" type="button" class="primary">저장</button>
+  <button data-act="save" type="button" class="primary" title="저장 (Ctrl+S)">저장</button>
   <button data-act="saveas" type="button">다른 이름으로 저장</button>
   <span class="status" id="status"></span>
 </header>
