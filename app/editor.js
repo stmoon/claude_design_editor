@@ -255,9 +255,15 @@
     const rl = rdoc() && slides(rdoc());
     if (rl) rl.forEach((s, i) => s.toggleAttribute('data-cde-current', i === current));
     rl?.[current]?.parentElement?.scrollIntoView({ block: 'nearest' });
-    fit();
-    mountTools();
-    syncToolbar();
+    // Redrawing the chrome must never be able to block navigation.
+    try {
+      fit();
+      mountTools();
+      syncToolbar();
+    } catch (err) {
+      say('편집 도구 표시 실패 - ' + err.message, 'bad');
+      console.error(err);
+    }
   }
 
   // The deck's own pixel size. Falls back when its stylesheet has not landed
@@ -406,11 +412,7 @@
           `width:${tb.width / scale}px;height:26px`;
         return;
       }
-      if (sp.kind === 'trow') {
-        resizeRows(sp, ev.clientY);
-      } else if (sp.kind === 'tcol') {
-        resizeCols(sp, ev.clientX);
-      } else if (sp.kind === 'pad') {
+      if (sp.kind === 'pad') {
         const cs = getComputedStyle(sp.host);
         const pad = parseFloat(cs[sp.prop]) || 0;
         const full = (sp.axis === 'x' ? sp.host.getBoundingClientRect().width
@@ -742,6 +744,15 @@
     doc.querySelectorAll('[data-edit-ui]').forEach((el) => el.remove());
     slides(doc).forEach((s, i) => { s.dataset.cdeSlide = String(i); });
     slides(doc).forEach((s) => normalize(s));
+    // Delegated so it survives thumbnails being rebuilt, and so a click
+    // anywhere in the strip - badge, padding, slide - still selects.
+    doc.addEventListener('click', (e) => {
+      const thumb = e.target.closest?.('.cde-thumb');
+      if (!thumb) return;
+      const list = [...doc.querySelectorAll('.cde-thumb')];
+      const at = list.indexOf(thumb);
+      if (at >= 0) select(at);
+    });
     layoutRail();
     doc.defaultView.addEventListener('resize', layoutRail);
     new ResizeObserver(layoutRail).observe(document.getElementById('railPane'));
@@ -764,7 +775,6 @@
         const no = doc.createElement('span');
         no.className = 'cde-no';
         thumb.appendChild(no);
-        thumb.addEventListener('click', () => select(i));
       }
       thumb.querySelector('.cde-no').textContent = String(i + 1);
       thumb.style.width = width + 'px';
