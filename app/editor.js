@@ -123,7 +123,9 @@
     }, true);
 
     slides(doc).forEach((s, i) => { s.dataset.cdeSlide = String(i); });
-    slides(doc).forEach((s) => normalize(s));
+    // No normalising on open. A deck may use its own layout - .lead, .cols,
+    // .note, custom grids - and rewriting it into the two-area model just
+    // because the file was opened would silently destroy the design.
     select(Math.min(current, slides(doc).length - 1));
 
     doc.querySelectorAll(cfg.editable).forEach((el) => el.setAttribute('contenteditable', 'true'));
@@ -316,7 +318,7 @@
 
     // Outer edges: drag the body's own padding in from the top/bottom (vertical
     // layouts) or the left/right (side-by-side ones).
-    const vertical = ['bottom', 'top', 'text', 'media'].includes(name);
+    const vertical = !name || ['bottom', 'top', 'text', 'media'].includes(name);
     const pads = vertical
       ? [['paddingTop', 'y', 'start'], ['paddingBottom', 'y', 'end']]
       : [['paddingLeft', 'x', 'start'], ['paddingRight', 'x', 'end']];
@@ -586,7 +588,8 @@
   }
 
   // --- figure tools -------------------------------------------------------
-  const DELETABLE = '.cde-media > *, .cde-text > *, .cde-text li';
+  // .body > * covers decks that have not been normalised into the two-area model.
+  const DELETABLE = '.cde-media > *, .cde-text > *, .cde-text li, .body > *, .body li';
 
   // Removing a figure has to undo what adding it did, or the survivor keeps
   // the half-width cell the pair needed.
@@ -608,7 +611,7 @@
       body.style.removeProperty('--cde-a');
       body.querySelectorAll('.cde-col').forEach((c) => c.style.removeProperty('--cde-row'));
     }
-    normalize(currentSlide(), body?.dataset.cdeLayout);
+    if (body?.dataset.cdeLayout) normalize(currentSlide(), body.dataset.cdeLayout);
     select(current);
     markDirty('삭제됨 - 저장 대기');
   }
@@ -744,10 +747,10 @@
   function syncToolbar() {
     const body = currentBody();
     const has = !!body?.querySelector('.cde-media')?.children.length;
-    const name = body?.dataset.cdeLayout || 'text';
+    const name = body?.dataset.cdeLayout || '';
     const spec = LAYOUTS.find((l) => l[0] === name);
-    $('layIcon').innerHTML = body ? layoutIcon(name) : '';
-    $('layName').textContent = body ? (spec ? spec[1] : name) : '레이아웃';
+    $('layIcon').innerHTML = spec ? layoutIcon(name) : '';
+    $('layName').textContent = body ? (spec ? spec[1] : '덱 원래 배치') : '레이아웃';
     bar.querySelector('[data-act="pick"]').disabled = !body;
     $('layMenu').querySelectorAll('button').forEach((b) => {
       b.setAttribute('aria-pressed', String(b.dataset.layout === name));
@@ -853,7 +856,6 @@
     ensureLayoutLink(doc);
     doc.querySelectorAll('[data-edit-ui]').forEach((el) => el.remove());
     slides(doc).forEach((s, i) => { s.dataset.cdeSlide = String(i); });
-    slides(doc).forEach((s) => normalize(s));
     // Delegated so it survives thumbnails being rebuilt, and so a click
     // anywhere in the strip - badge, padding, slide - still selects.
     doc.addEventListener('click', (e) => {
