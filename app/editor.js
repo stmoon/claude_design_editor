@@ -10,7 +10,21 @@
   const statusEl = $('status');
 
   // Wrappers from hand-written decks that the layout model replaces.
-  const UNWRAP = '.cols, .cols-fig, .col-text, .fig-stack, .cde-text, .cde-media, .cde-col';
+  const UNWRAP = '.cols, .cols-fig, .col-text, .fig-stack, .cde-text, .cde-media, .cde-col,'
+               + '.body-text, .body-media, .body-col';
+
+  // Some decks ship this very layout model under their own names: data-layout
+  // with .body-text / .body-media and --split / --row / --ctpl / --rtpl. Their
+  // stylesheet keys on those names, so the editor reads and writes whichever
+  // set a body already uses instead of renaming it.
+  const CDE_NAMES = { media: '.cde-media', a: '--cde-a', row: '--cde-row',
+                      ctpl: '--cde-ctpl', rtpl: '--cde-rtpl' };
+  const DECK_NAMES = { media: '.body-media', a: '--split', row: '--row',
+                       ctpl: '--ctpl', rtpl: '--rtpl' };
+  const deckNative = (body) =>
+    body.dataset.cdeLayout === undefined && body.dataset.layout !== undefined;
+  const namesOf = (body) => (deckNative(body) ? DECK_NAMES : CDE_NAMES);
+  const layoutName = (body) => (body ? (body.dataset.cdeLayout ?? body.dataset.layout ?? '') : '');
   // Each layout, with the regions its icon draws: [kind, x, y, w, h] in a 48x28 box.
   const LAYOUTS = [
     ['bottom', '글 위 · 그림 아래',  [['t', 3, 3, 42, 8], ['m', 3, 14, 42, 11]]],
@@ -255,6 +269,7 @@
       body.replaceChildren(textBox, mediaBox);
     }
     body.dataset.cdeLayout = name;
+    delete body.dataset.layout;
     body.style.setProperty('--cde-cols', cols);
   }
 
@@ -311,7 +326,8 @@
   // --- in-slide split handles -------------------------------------------
   // A layout can have more than one adjustable boundary; quad has three.
   function splitsOf(body) {
-    const name = body.dataset.cdeLayout;
+    const name = layoutName(body);
+    const nm = namesOf(body);
     const kids = (el) => [...el.children].filter(notUI);
     const byOrder = (a, b) => (getComputedStyle(a).order | 0) - (getComputedStyle(b).order | 0);
     const out = [];
@@ -328,15 +344,15 @@
     if (['bottom', 'top', 'left', 'right'].includes(name)) {
       const [a, b] = kids(body).sort(byOrder);
       const axis = (name === 'left' || name === 'right') ? 'x' : 'y';
-      if (a && b) out.push({ kind: 'ratio', host: body, axis, prop: '--cde-a', a, b });
+      if (a && b) out.push({ kind: 'ratio', host: body, axis, prop: nm.a, a, b });
     } else if (name === 'quad') {
       const cols = kids(body);
       if (cols.length === 2) {
-        out.push({ kind: 'ratio', host: body, axis: 'x', prop: '--cde-a', a: cols[0], b: cols[1] });
+        out.push({ kind: 'ratio', host: body, axis: 'x', prop: nm.a, a: cols[0], b: cols[1] });
       }
       cols.forEach((col) => {
         const [a, b] = kids(col);
-        if (a && b) out.push({ kind: 'ratio', host: col, axis: 'y', prop: '--cde-row', a, b });
+        if (a && b) out.push({ kind: 'ratio', host: col, axis: 'y', prop: nm.row, a, b });
       });
     }
 
@@ -354,16 +370,16 @@
     });
 
     // Boundaries between the media cells themselves - figure/figure, figure/table.
-    body.querySelectorAll('.cde-media').forEach((mbox) => {
+    body.querySelectorAll(nm.media).forEach((mbox) => {
       if (kids(mbox).length < 2) return;
       const cs = getComputedStyle(mbox);
       const cols = cs.gridTemplateColumns.split(' ').filter(Boolean).length;
       const rows = cs.gridTemplateRows.split(' ').filter(Boolean).length;
       for (let i = 0; i < cols - 1; i++) {
-        out.push({ kind: 'track', host: mbox, axis: 'x', prop: '--cde-ctpl', index: i });
+        out.push({ kind: 'track', host: mbox, axis: 'x', prop: nm.ctpl, index: i });
       }
       for (let j = 0; j < rows - 1; j++) {
-        out.push({ kind: 'track', host: mbox, axis: 'y', prop: '--cde-rtpl', index: j });
+        out.push({ kind: 'track', host: mbox, axis: 'y', prop: nm.rtpl, index: j });
       }
     });
     return out;
@@ -747,7 +763,7 @@
   function syncToolbar() {
     const body = currentBody();
     const has = !!body?.querySelector('.cde-media')?.children.length;
-    const name = body?.dataset.cdeLayout || '';
+    const name = layoutName(body);
     const spec = LAYOUTS.find((l) => l[0] === name);
     $('layIcon').innerHTML = spec ? layoutIcon(name) : '';
     $('layName').textContent = body ? (spec ? spec[1] : '덱 원래 배치') : '레이아웃';
