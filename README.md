@@ -6,8 +6,11 @@
 ```bash
 python3 editor.py /path/to/decks           # 하위 폴더까지 뒤져 덱을 모두 찾는다
 python3 editor.py /path/to/deck.html       # 특정 파일을 연다
-python3 editor.py . --port 8770 --no-open
+python3 editor.py . --port 8770 --no-open   # 브라우저를 띄우지 않는다
 ```
+
+시작하면 기본으로 브라우저가 자동으로 열린다. `--no-open` 을 주면 열지 않고
+주소만 찍어 주므로, 이미 띄워 둔 창에서 열거나 원격에서 붙을 때 쓴다.
 
 폴더를 주면 그 아래 모든 `.html` 을 찾아 도구막대 목록에 올린다. 폴더별로 묶여
 나오므로 덱이 여러 폴더에 흩어져 있어도 한 창에서 오간다.

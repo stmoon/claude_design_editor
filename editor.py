@@ -222,8 +222,9 @@ def main():
     ap = argparse.ArgumentParser(description='Claude Design Editor')
     ap.add_argument('target', nargs='?', default='.',
                     help='deck directory, or a single .html file')
-    ap.add_argument('--port', type=int, default=8770)
-    ap.add_argument('--no-open', action='store_true')
+    ap.add_argument('--port', type=int, default=8770, help='listen port (default 8770)')
+    ap.add_argument('--no-open', action='store_true',
+                    help='do not launch a browser; the editor opens one by default')
     args = ap.parse_args()
 
     target = Path(args.target).resolve()
