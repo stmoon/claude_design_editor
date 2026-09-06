@@ -9,7 +9,7 @@
 <header class="bar">
   <strong class="brand">Claude Design Editor</strong>
   <select id="deck" title="열 파일"></select>
-  <span class="keys" title="PageUp / PageDown 슬라이드 이동 · Ctrl+S 저장 · Ctrl+Z 되돌리기">PgUp / PgDn</span>
+  <span class="keys" title="PageUp / PageDown 슬라이드 이동 · Alt+↑/↓ 순서 이동 · 목록에서 Del 슬라이드 삭제 · Ctrl+S 저장 · Ctrl+Z 되돌리기">PgUp / PgDn</span>
 
   <span class="sep"></span>
 
@@ -40,6 +40,9 @@
 <main class="split" id="split">
   <aside class="rail" id="railPane">
     <iframe id="rail" title="슬라이드 목록"></iframe>
+    <nav id="outline" class="outline" aria-label="장절" hidden></nav>
+    <button id="addSlide" type="button" class="rail-add"
+            title="선택한 슬라이드 다음에 같은 디자인으로 추가">+ 새 슬라이드</button>
   </aside>
   <div class="grip" id="grip" title="드래그로 폭 조절"></div>
   <section class="stage" id="stagePane">

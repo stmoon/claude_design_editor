@@ -167,7 +167,9 @@
       if (item) { e.preventDefault(); removeItem(item); }
     });
     doc.defaultView.addEventListener('resize', fit);
+    doc.defaultView.addEventListener('scroll', () => markOutline(), { passive: true });
     new ResizeObserver(fit).observe(document.getElementById('stagePane'));
+    setPanelMode();
     fetch('/_stat?path=' + encodeURIComponent(deckName))
       .then((r) => r.json()).then((s) => { lastMtime = s.mtime; });
     say('준비됨', 'ok');
@@ -794,23 +796,78 @@
     });
   }
 
+  // The rail renders the same deck a second time, so any change to the deck's
+  // shape - order, a new page, undo - is mirrored by re-copying the stage.
+  const thumbOf = (s) => (s.parentElement?.classList.contains('cde-thumb') ? s.parentElement : s);
+
+  function railFollow() {
+    const rd = rdoc();
+    const rs = rd ? slides(rd) : [];
+    if (!rs.length) return;
+    const last = thumbOf(rs[rs.length - 1]);
+    const host = last.parentElement, next = last.nextSibling;
+    rs.forEach((s) => thumbOf(s).remove());
+    slides(sdoc()).forEach((s, i) => {
+      const copy = s.cloneNode(true);
+      copy.querySelectorAll('[data-cde-ui]').forEach((el) => el.remove());
+      copy.querySelectorAll('[contenteditable]').forEach((el) => el.removeAttribute('contenteditable'));
+      copy.removeAttribute('data-cde-sel');
+      copy.dataset.cdeSlide = String(i);
+      host.insertBefore(copy, next);
+    });
+    layoutRail();
+  }
+
   function moveSlide(from, to) {
-    if (from === to || from < 0 || to < 0) return;
-    pushUndo();
     const ss = slides(sdoc());
+    if (from === to || from < 0 || to < 0 || from >= ss.length || to >= ss.length) return;
+    pushUndo();
     const host = ss[0].parentElement;
     host.insertBefore(ss[from], to > from ? ss[to].nextSibling : ss[to]);
-
-    const thumbs = [...rdoc().querySelectorAll('.cde-thumb')];
-    const rhost = thumbs[0].parentElement;
-    rhost.insertBefore(thumbs[from], to > from ? thumbs[to].nextSibling : thumbs[to]);
-
     slides(sdoc()).forEach((s, i) => { s.dataset.cdeSlide = String(i); });
-    slides(rdoc()).forEach((s, i) => { s.dataset.cdeSlide = String(i); });
     renumber();
-    layoutRail();
+    railFollow();
     select(to);
     markDirty('순서 변경 - 저장 대기');
+  }
+
+  // A new page is the page above it with the wording taken out: same layout,
+  // same footer and section furniture, so the deck keeps one look.
+  const KEEP_TEXT = '.kicker, .course, .presenter, .foot-sec, .folio, .foot-num';
+
+  function addSlide() {
+    const from = slides(sdoc())[current];
+    if (!from) return;
+    pushUndo();
+    const copy = from.cloneNode(true);
+    copy.removeAttribute('data-cde-current');
+    copy.querySelectorAll('[data-cde-ui]').forEach((el) => el.remove());
+    copy.querySelectorAll('[data-cde-sel]').forEach((el) => el.removeAttribute('data-cde-sel'));
+    copy.querySelectorAll(cfg.editable).forEach((el) => {
+      if (!el.closest(KEEP_TEXT)) el.textContent = '';
+    });
+    from.after(copy);
+    slides(sdoc()).forEach((s, i) => { s.dataset.cdeSlide = String(i); });
+    sdoc().querySelectorAll(cfg.editable).forEach((el) => el.setAttribute('contenteditable', 'true'));
+    renumber();
+    railFollow();
+    select(current + 1);
+    markDirty('슬라이드 추가 - 저장 대기');
+  }
+
+  // Del in the slide list removes the whole page. One slide has to survive:
+  // with none left there is no deck host left to undo back into.
+  function removeSlide(index) {
+    const ss = slides(sdoc());
+    if (index < 0 || index >= ss.length) return;
+    if (ss.length < 2) { say('마지막 슬라이드는 지울 수 없다', 'warn'); return; }
+    pushUndo();
+    ss[index].remove();
+    slides(sdoc()).forEach((s, i) => { s.dataset.cdeSlide = String(i); });
+    renumber();
+    railFollow();
+    select(Math.min(index, slides(sdoc()).length - 1));
+    markDirty('슬라이드 삭제 - Ctrl+Z 로 되돌린다');
   }
 
   // Drag a thumbnail to move the slide. A plain click still selects.
@@ -835,7 +892,7 @@
         if (!dragMoved && Math.abs(ev.clientY - startY) < 6) return;
         if (!dragMoved) { dragMoved = true; thumb.setAttribute('data-cde-drag', ''); }
         const list = [...doc.querySelectorAll('.cde-thumb')];
-        target = list.length - 1;
+        target = list.length;
         for (let i = 0; i < list.length; i++) {
           const r = list[i].getBoundingClientRect();
           if (ev.clientY < r.top + r.height / 2) { target = i; break; }
@@ -848,8 +905,10 @@
                                             : at.offsetTop - 8) + 'px';
       };
       const up = () => {
-        doc.removeEventListener('pointermove', move);
-        doc.removeEventListener('pointerup', up);
+        if (thumb.hasPointerCapture(e.pointerId)) thumb.releasePointerCapture(e.pointerId);
+        thumb.removeEventListener('pointermove', move);
+        thumb.removeEventListener('pointerup', up);
+        thumb.removeEventListener('pointercancel', up);
         drop.style.display = 'none';
         thumb.removeAttribute('data-cde-drag');
         if (dragMoved) {
@@ -859,9 +918,67 @@
         dragFrom = -1;
         setTimeout(() => { dragMoved = false; }, 0);
       };
-      doc.addEventListener('pointermove', move);
-      doc.addEventListener('pointerup', up);
+      thumb.setPointerCapture(e.pointerId);
+      thumb.addEventListener('pointermove', move);
+      thumb.addEventListener('pointerup', up);
+      thumb.addEventListener('pointercancel', up);
     });
+  }
+
+  // --- outline ---------------------------------------------------------------
+  // A deck is a run of slides; some files are one long document instead. With
+  // no slide to thumbnail, the left panel lists the document's 장절 headings.
+  let docMode = false;
+
+  const plainText = (el) => {
+    const c = el.cloneNode(true);
+    c.querySelectorAll('[data-cde-ui]').forEach((x) => x.remove());
+    return c.textContent.trim();
+  };
+
+  function setPanelMode() {
+    docMode = !slides(sdoc()).length;
+    rail.hidden = docMode;
+    $('addSlide').hidden = docMode;
+    $('outline').hidden = !docMode;
+    if (docMode) buildOutline();
+  }
+
+  function buildOutline() {
+    const box = $('outline'), doc = sdoc();
+    const heads = [...doc.querySelectorAll(cfg.heading || 'h1, h2, h3')].filter(notUI);
+    box.replaceChildren();
+    if (!heads.length) {
+      box.innerHTML = '<p class="empty">장절 제목이 없다</p>';
+      return;
+    }
+    heads.forEach((h, i) => {
+      h.dataset.cdeHead = String(i);
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.dataset.level = h.tagName.slice(1);
+      b.textContent = plainText(h) || '(제목 없음)';
+      b.addEventListener('click', () => {
+        h.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        markOutline(i);
+      });
+      box.appendChild(b);
+    });
+    markOutline();
+  }
+
+  // Which 장절 the reader is in: the last heading at or above the fold.
+  function markOutline(force) {
+    const box = $('outline'), doc = sdoc();
+    if (!docMode || !doc) return;
+    let at = force;
+    if (at == null) {
+      const heads = [...doc.querySelectorAll('[data-cde-head]')];
+      const top = (doc.defaultView.scrollY || doc.documentElement.scrollTop || 0) + 48;
+      at = 0;
+      heads.forEach((h, i) => { if (h.offsetTop <= top) at = i; });
+    }
+    [...box.children].forEach((b, i) => b.toggleAttribute('data-cur', i === at));
   }
 
   // --- rail ----------------------------------------------------------------
@@ -883,6 +1000,12 @@
       if (at >= 0) select(at);
     });
     doc.addEventListener('keydown', shortcuts);
+    doc.addEventListener('keydown', (e) => {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      if (doc.activeElement && doc.activeElement.isContentEditable) return;
+      e.preventDefault();
+      removeSlide(current);
+    });
     initReorder(doc);
     layoutRail();
     doc.defaultView.addEventListener('resize', layoutRail);
@@ -920,15 +1043,19 @@
   function syncRailSoon() {
     clearTimeout(railTimer);
     railTimer = setTimeout(() => {
+      if (docMode) { buildOutline(); return; }
       const from = currentSlide(), to = rdoc() && slides(rdoc())[current];
       if (!from || !to) return;
       const clone = from.cloneNode(true);
       clone.querySelectorAll('[data-cde-ui]').forEach((el) => el.remove());
       clone.querySelectorAll('[contenteditable]').forEach((el) => el.removeAttribute('contenteditable'));
       to.replaceChildren(...clone.childNodes);
-      to.dataset.cdeLayout = clone.dataset.cdeLayout || '';
+      if (clone.dataset.cdeLayout !== undefined) to.dataset.cdeLayout = clone.dataset.cdeLayout;
       const body = to.querySelector(cfg.body), src = clone.querySelector(cfg.body);
-      if (body && src) { body.dataset.cdeLayout = src.dataset.cdeLayout; body.style.cssText = src.style.cssText; }
+      if (body && src) {
+        if (src.dataset.cdeLayout !== undefined) body.dataset.cdeLayout = src.dataset.cdeLayout;
+        body.style.cssText = src.style.cssText;
+      }
       layoutRail();
     }, 250);
   }
@@ -960,6 +1087,8 @@
     const doc = sdoc();
     slides(doc).forEach((s, i) => { s.dataset.cdeSlide = String(i); });
     doc.querySelectorAll(cfg.editable).forEach((el) => el.setAttribute('contenteditable', 'true'));
+    renumber();
+    railFollow();
     current = Math.min(step.index, slides(doc).length - 1);
     select(current);
     markDirty('되돌림 - 저장 대기');
@@ -1046,7 +1175,12 @@
       if (k === 'z' && !editing) { e.preventDefault(); undo(); return; }
       return;
     }
-    if (e.altKey) return;
+    if (e.altKey) {
+      if (editing) return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); moveSlide(current, current + 1); }
+      if (e.key === 'ArrowUp') { e.preventDefault(); moveSlide(current, current - 1); }
+      return;
+    }
     if (e.key === 'PageDown') { e.preventDefault(); select(current + 1); return; }
     if (e.key === 'PageUp') { e.preventDefault(); select(current - 1); return; }
     if (e.key === 'Home' && !editing) { e.preventDefault(); select(0); return; }
@@ -1058,6 +1192,8 @@
     if (e.key === 'ArrowUp') { e.preventDefault(); select(current - 1); }
   }
   document.addEventListener('keydown', shortcuts);
+
+  $('addSlide').addEventListener('click', addSlide);
 
   bar.addEventListener('click', (e) => {
     // closest, not e.target: buttons with an icon or a label span inside would

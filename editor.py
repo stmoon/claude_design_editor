@@ -33,6 +33,7 @@ DEFAULT_CONFIG = {
     'body': '.body',                    # the region layouts rearrange
     'title': '.title, h1, h2',          # used for the slide list labels
     'media': 'figure, table, .tbl, .fig-stack, img, svg, pre',
+    'heading': 'h1, h2, h3',            # 장절 - the outline shown for slideless files
     'editable': ('.title, .kicker, .course, .display, .presenter, .lead, '
                  '.foot-sec, .ul li, .tbl th, .tbl td, .card, p'),
     'imageDir': 'imgs',
