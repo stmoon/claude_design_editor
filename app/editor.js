@@ -25,36 +25,14 @@
     body.dataset.cdeLayout === undefined && body.dataset.layout !== undefined;
   const namesOf = (body) => (deckNative(body) ? DECK_NAMES : CDE_NAMES);
   const layoutName = (body) => (body ? (body.dataset.cdeLayout ?? body.dataset.layout ?? '') : '');
-  // Each layout, with the regions its icon draws: [kind, x, y, w, h] in a 48x28 box.
-  const LAYOUTS = [
-    ['bottom', '글 위 · 그림 아래',  [['t', 3, 3, 42, 8], ['m', 3, 14, 42, 11]]],
-    ['right',  '글 왼쪽 · 그림 오른쪽', [['t', 3, 3, 19, 22], ['m', 25, 3, 20, 22]]],
-    ['left',   '그림 왼쪽 · 글 오른쪽', [['m', 3, 3, 20, 22], ['t', 26, 3, 19, 22]]],
-    ['top',    '그림 위 · 글 아래',  [['m', 3, 3, 42, 11], ['t', 3, 17, 42, 8]]],
-    ['quad',   '2단 · 각 단 글 위 그림 아래',
-     [['t', 3, 3, 19, 7], ['m', 3, 12, 19, 13], ['t', 26, 3, 19, 7], ['m', 26, 12, 19, 13]]],
-    ['text',   '글만',            [['t', 3, 3, 42, 22]]],
-    ['media',  '그림만',           [['m', 3, 3, 42, 22]]],
-  ];
-
-  // Text draws as stacked bars, media as a solid block - readable at 48px wide.
-  function layoutIcon(name) {
-    const spec = LAYOUTS.find((l) => l[0] === name);
-    if (!spec) return '';
-    const parts = spec[2].map(([kind, x, y, w, h]) => {
-      if (kind === 'm') {
-        return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="2" fill="#94a3b8"/>`;
-      }
-      const n = Math.max(1, Math.min(3, Math.floor(h / 4)));
-      return Array.from({ length: n }, (_, i) =>
-        `<rect x="${x}" y="${y + i * 4}" width="${i === n - 1 ? Math.round(w * 0.6) : w}"` +
-        ` height="2" rx="1" fill="#60a5fa"/>`).join('');
-    }).join('');
-    return `<svg width="48" height="28" viewBox="0 0 48 28" aria-hidden="true">` +
-           `<rect x="0.5" y="0.5" width="47" height="27" rx="3" fill="#fff" stroke="#cbd5e1"/>` +
-           parts + `</svg>`;
-  }
   const notUI = (el) => !el.hasAttribute('data-cde-ui');
+
+  // A slideless file has no .body and none of a deck's classes, so its text is
+  // described by plain tags instead. Blocks are what a click picks there.
+  const DOC_EDIT = 'h1, h2, h3, h4, h5, h6, p, li, dt, dd, td, th, caption,'
+                 + 'blockquote, figcaption, pre > code';
+  const DOC_BLOCKS = 'h1, h2, h3, h4, h5, h6, p, ul, ol, dl, table, pre,'
+                   + 'blockquote, figure';
 
   let cfg = null, deckName = '', current = 0, dirty = false;
   const undoStack = [];
@@ -140,9 +118,10 @@
     // No normalising on open. A deck may use its own layout - .lead, .cols,
     // .note, custom grids - and rewriting it into the two-area model just
     // because the file was opened would silently destroy the design.
+    setPanelMode();
     select(Math.min(current, slides(doc).length - 1));
 
-    doc.querySelectorAll(cfg.editable).forEach((el) => el.setAttribute('contenteditable', 'true'));
+    makeEditable(doc);
     let burst = null;
     doc.addEventListener('beforeinput', (e) => {
       if (!e.target.isContentEditable) return;
@@ -169,10 +148,17 @@
     doc.defaultView.addEventListener('resize', fit);
     doc.defaultView.addEventListener('scroll', () => markOutline(), { passive: true });
     new ResizeObserver(fit).observe(document.getElementById('stagePane'));
-    setPanelMode();
     fetch('/_stat?path=' + encodeURIComponent(deckName))
       .then((r) => r.json()).then((s) => { lastMtime = s.mtime; });
     say('준비됨', 'ok');
+  }
+
+  const editableSelector = () => (docMode ? cfg.editable + ',' + DOC_EDIT : cfg.editable);
+
+  function makeEditable(doc) {
+    doc.querySelectorAll(editableSelector()).forEach((el) => {
+      if (!el.closest('[data-cde-ui]')) el.setAttribute('contenteditable', 'true');
+    });
   }
 
   function injectChrome(doc) {
@@ -275,6 +261,191 @@
     body.style.setProperty('--cde-cols', cols);
   }
 
+  // --- 등분 배치 -----------------------------------------------------------
+  // A body is a stack of bands; a band is a row of equal cells. The spec is one
+  // digit per band - '2-1' is two cells over one. Any cell takes any content.
+  const GRIDS = [
+    ['1', '한 칸'],
+    ['2', '좌우 2등분'],
+    ['1-1', '위아래 2등분'],
+    ['2-1', '위 2 · 아래 1'],
+    ['1-2', '위 1 · 아래 2'],
+    ['2-2', '2 x 2'],
+    ['3', '3단'],
+    ['1-1-1', '위아래 3등분'],
+  ];
+  const bandSizes = (spec) => spec.split('-').map((n) => Math.max(1, Math.min(6, Number(n) || 1)));
+  const bandsOf = (body) => [...body.querySelectorAll(':scope > .cde-band')];
+  const cellsOf = (band) => [...band.querySelectorAll(':scope > .cde-cell')];
+  const isGrid = (body) => !!body && body.dataset.cdeGrid !== undefined;
+  const gridSpec = (body) => bandsOf(body).map((b) => cellsOf(b).length).join('-');
+
+  function gridIcon(spec) {
+    const rows = bandSizes(spec);
+    const h = (22 - (rows.length - 1) * 3) / rows.length;
+    let y = 3, parts = '';
+    rows.forEach((n) => {
+      const w = (42 - (n - 1) * 3) / n;
+      for (let i = 0; i < n; i++) {
+        parts += `<rect x="${(3 + i * (w + 3)).toFixed(1)}" y="${y.toFixed(1)}"`
+               + ` width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="#94a3b8"/>`;
+      }
+      y += h + 3;
+    });
+    return '<svg width="48" height="28" viewBox="0 0 48 28" aria-hidden="true">'
+         + '<rect x="0.5" y="0.5" width="47" height="27" rx="3" fill="#fff" stroke="#cbd5e1"/>'
+         + parts + '</svg>';
+  }
+
+  const newCell = (doc) => {
+    const el = doc.createElement('div');
+    el.className = 'cde-cell';
+    return el;
+  };
+  const newBand = (doc, n) => {
+    const b = doc.createElement('div');
+    b.className = 'cde-band';
+    for (let i = 0; i < n; i++) b.appendChild(newCell(doc));
+    return b;
+  };
+
+  // The written-down shape has to follow the DOM, or a hand-added cell would
+  // still be sized as if it were not there.
+  function syncGrid(body) {
+    if (!isGrid(body)) return;
+    const bands = bandsOf(body);
+    body.dataset.cdeGrid = gridSpec(body);
+    body.style.setProperty('--cde-rows', String(bands.length));
+    bands.forEach((b) => b.style.setProperty('--cde-cells', String(cellsOf(b).length)));
+    body.querySelectorAll('.cde-cell').forEach((c) => {
+      c.toggleAttribute('data-cde-empty', ![...c.children].filter(notUI).length);
+    });
+  }
+
+  // Everything the body holds, wrappers peeled off, in reading order.
+  function blocksOf(body) {
+    const out = [];
+    (function walk(node) {
+      [...node.children].filter(notUI).forEach((el) => {
+        if (el.matches(UNWRAP) || el.matches('.cde-band, .cde-cell')) { walk(el); return; }
+        out.push(el);
+      });
+    })(body);
+    return out;
+  }
+
+  function applyGrid(spec) {
+    const slide = currentSlide(), body = currentBody();
+    if (!slide || !body) return;
+    pushUndo();
+    const doc = slide.ownerDocument;
+    body.querySelectorAll('[data-cde-ui]').forEach((el) => el.remove());
+    const items = blocksOf(body);
+    const bands = bandSizes(spec).map((n) => newBand(doc, n));
+    body.replaceChildren(...bands);
+    const cells = bands.flatMap((b) => cellsOf(b));
+    // One block per cell in reading order; whatever is left stacks in the last.
+    items.forEach((el, i) => cells[Math.min(i, cells.length - 1)].appendChild(el));
+    delete body.dataset.cdeLayout;
+    delete body.dataset.layout;
+    ['--cde-a', '--cde-rtpl', '--cde-ctpl', '--split', '--cde-cols'].forEach(
+      (prop) => body.style.removeProperty(prop));
+    body.dataset.cdeGrid = spec;
+    syncGrid(body);
+    select(current);
+    markDirty('배치 변경 - 저장 대기');
+  }
+
+  function addCell(cell, side) {
+    const band = cell.parentElement, body = currentBody();
+    if (!band || !body) return;
+    pushUndo();
+    const doc = cell.ownerDocument;
+    if (side === 'left' || side === 'right') {
+      band.insertBefore(newCell(doc), side === 'left' ? cell : cell.nextSibling);
+      band.style.removeProperty('--cde-ctpl');
+    } else {
+      body.insertBefore(newBand(doc, 1), side === 'top' ? band : band.nextSibling);
+      body.style.removeProperty('--cde-rtpl');
+    }
+    syncGrid(body);
+    select(current);
+    markDirty('칸 추가 - 저장 대기');
+  }
+
+  function removeCell(cell) {
+    const band = cell.parentElement, body = currentBody();
+    if (!band || !body) return;
+    if (cellsOf(band).length === 1 && bandsOf(body).length === 1) {
+      say('마지막 칸은 지울 수 없다', 'warn');
+      return;
+    }
+    pushUndo();
+    // Content moves next door rather than disappearing with the cell.
+    const rest = [...cell.children].filter(notUI);
+    const siblings = cellsOf(band).filter((c) => c !== cell);
+    const other = siblings[0]
+      || cellsOf(band.previousElementSibling || band.nextElementSibling || band)[0];
+    if (other && rest.length) rest.forEach((el) => other.appendChild(el));
+    cell.remove();
+    band.style.removeProperty('--cde-ctpl');
+    if (!cellsOf(band).length) { band.remove(); body.style.removeProperty('--cde-rtpl'); }
+    syncGrid(body);
+    select(current);
+    markDirty('칸 삭제 - 저장 대기');
+  }
+
+  // What an empty cell offers. Images go through the upload path instead.
+  const NEW_BLOCK = {
+    list: (doc) => {
+      const ul = doc.createElement('ul');
+      ul.className = 'ul';
+      ['첫 항목', '둘째 항목'].forEach((t) => {
+        const li = doc.createElement('li');
+        li.textContent = t;
+        ul.appendChild(li);
+      });
+      return ul;
+    },
+    table: (doc) => {
+      const table = doc.createElement('table');
+      table.className = 'tbl';
+      const thead = doc.createElement('thead');
+      const hr = doc.createElement('tr');
+      ['항목', '설명', '비고'].forEach((t) => {
+        const th = doc.createElement('th');
+        th.textContent = t;
+        hr.appendChild(th);
+      });
+      thead.appendChild(hr);
+      const tbody = doc.createElement('tbody');
+      for (let r = 0; r < 2; r++) {
+        const tr = doc.createElement('tr');
+        for (let c = 0; c < 3; c++) tr.appendChild(doc.createElement('td'));
+        tbody.appendChild(tr);
+      }
+      table.append(thead, tbody);
+      return table;
+    },
+    code: (doc) => {
+      const pre = doc.createElement('pre');
+      const code = doc.createElement('code');
+      code.textContent = 'cmake -S . -B build\ncmake --build build';
+      pre.appendChild(code);
+      return pre;
+    },
+  };
+
+  function insertInto(cell, kind) {
+    if (kind === 'image') { askImage(null, null, null, cell); return; }
+    pushUndo();
+    cell.appendChild(NEW_BLOCK[kind](cell.ownerDocument));
+    makeEditable(sdoc());
+    syncGrid(currentBody());
+    select(current);
+    markDirty('내용 추가 - 저장 대기');
+  }
+
   function currentSlide() { return slides(sdoc())[current] || null; }
   function currentBody() { return currentSlide()?.querySelector(cfg.body) || null; }
 
@@ -343,7 +514,17 @@
     pads.forEach(([prop, axis, side]) =>
       out.push({ kind: 'pad', host: body, axis, prop, side }));
 
-    if (['bottom', 'top', 'left', 'right'].includes(name)) {
+    if (isGrid(body)) {
+      const bands = bandsOf(body);
+      for (let i = 0; i < bands.length - 1; i++) {
+        out.push({ kind: 'track', host: body, axis: 'y', prop: '--cde-rtpl', index: i });
+      }
+      bands.forEach((band) => {
+        for (let i = 0; i < cellsOf(band).length - 1; i++) {
+          out.push({ kind: 'track', host: band, axis: 'x', prop: '--cde-ctpl', index: i });
+        }
+      });
+    } else if (['bottom', 'top', 'left', 'right'].includes(name)) {
       const [a, b] = kids(body).sort(byOrder);
       const axis = (name === 'left' || name === 'right') ? 'x' : 'y';
       if (a && b) out.push({ kind: 'ratio', host: body, axis, prop: nm.a, a, b });
@@ -384,6 +565,38 @@
         out.push({ kind: 'track', host: mbox, axis: 'y', prop: nm.rtpl, index: j });
       }
     });
+    // Any other grid the deck itself built - a two-column .cols, say - gets the
+    // same boundaries. With no variable to write into, the track sizes go on the
+    // element, which saves and prints the same way.
+    // One boundary, one handle: an element already modelled on an axis - a ratio,
+    // a media track, a band - is left alone on that axis.
+    const known = new Map();
+    out.forEach((sp) => {
+      if (sp.kind !== 'ratio' && sp.kind !== 'track') return;
+      if (!known.has(sp.host)) known.set(sp.host, new Set());
+      known.get(sp.host).add(sp.axis);
+    });
+    [body, ...body.querySelectorAll('*')].forEach((el) => {
+      if (el.closest('table') || el.hasAttribute('data-cde-ui')) return;
+      if (el.matches('.cde-media, .cde-band, .cde-cell')) return;
+      const cs = getComputedStyle(el);
+      if (!cs.display.includes('grid')) return;
+      if ([...el.children].filter(notUI).length < 2) return;
+      const cols = cs.gridTemplateColumns.split(' ').filter(Boolean).length;
+      const rows = cs.gridTemplateRows.split(' ').filter(Boolean).length;
+      const done = known.get(el);
+      if (!done?.has('x')) {
+        for (let i = 0; i < cols - 1; i++) {
+          out.push({ kind: 'track', host: el, axis: 'x', prop: 'grid-template-columns', index: i });
+        }
+      }
+      if (!done?.has('y')) {
+        for (let j = 0; j < rows - 1; j++) {
+          out.push({ kind: 'track', host: el, axis: 'y', prop: 'grid-template-rows', index: j });
+        }
+      }
+    });
+
     return out;
   }
 
@@ -555,6 +768,9 @@
     const pad = parseFloat(getComputedStyle(cell).paddingTop) || 16;
     const delta = (clientY - sp.row.getBoundingClientRect().bottom) / scaleOf();
     const next = Math.max(ROW_MIN, Math.min(ROW_MAX, pad + delta / (2 * n)));
+    // The attribute is what the stylesheet keys on, so the spacing applies
+    // wherever the table sits - and keeps applying with the editor closed.
+    sp.target.dataset.cdeTrow = '';
     sp.target.style.setProperty('--cde-trow', next.toFixed(1) + 'px');
   }
 
@@ -607,13 +823,27 @@
 
   // --- figure tools -------------------------------------------------------
   // .body > * covers decks that have not been normalised into the two-area model.
-  const DELETABLE = '.cde-media > *, .cde-text > *, .cde-text li, .body > *, .body li';
+  // Nearest wins, so the deck's own wrappers are listed too - clicking a table
+  // inside a deck's .cols picks the table, not the half of the slide holding it.
+  const DELETABLE = '.cde-media > *, .cde-text > *, .cde-text li,'
+                  + '.cde-cell > *, .cde-cell li,'
+                  + '.body-text > *, .body-media > *, .body-col > *,'
+                  + '.cols > *, .cols-fig > *, .cols3 > *, .fig-stack > *,'
+                  + '.body > *, .body li';
 
   // Removing a figure has to undo what adding it did, or the survivor keeps
   // the half-width cell the pair needed.
   function removeItem(item) {
     if (!item || item.hasAttribute('data-cde-ui')) return;
     pushUndo();
+    const cell = item.parentElement?.closest('.cde-cell');
+    if (cell) {
+      item.remove();
+      syncGrid(currentBody());
+      select(current);
+      markDirty('삭제됨 - 저장 대기');
+      return;
+    }
     const mbox = item.parentElement?.closest('.cde-media');
     item.remove();
     if (mbox) {
@@ -637,6 +867,7 @@
   function selectItem(item) {
     sdoc().querySelectorAll('[data-cde-sel]').forEach((el) => el.removeAttribute('data-cde-sel'));
     if (item) item.setAttribute('data-cde-sel', '');
+    try { syncToolbar(); } catch (err) { console.error(err); }
   }
 
   function delButton(doc, item, small) {
@@ -657,9 +888,12 @@
 
   function mountTools() {
     const doc = sdoc();
-    doc.querySelectorAll('.cde-plus, .cde-del').forEach((el) => el.remove());
+    doc.querySelectorAll('.cde-plus, .cde-del, .cde-minus, .cde-pick, .cde-grip')
+       .forEach((el) => el.remove());
     const body = currentBody();
     if (!body) return;
+
+    if (isGrid(body)) { cellTools(doc, body); return; }
 
     body.querySelectorAll('.cde-media').forEach((mbox) => {
       [...mbox.children].filter(notUI).forEach((item, index) => {
@@ -688,8 +922,112 @@
     body.querySelectorAll('.ul > li, .cde-text li').forEach((li) => delButton(doc, li, true));
   }
 
-  function askImage(mbox, index, side) {
-    pendingInsert = { mbox, index, side };
+  // Every cell can grow a neighbour, be removed, take new content, and hand its
+  // blocks to another cell.
+  function cellTools(doc, body) {
+    body.querySelectorAll('.cde-cell').forEach((cell) => {
+      [['left', '왼쪽에 칸 추가'], ['right', '오른쪽에 칸 추가'],
+       ['top', '위에 행 추가'], ['bottom', '아래에 행 추가']].forEach(([side, title]) => {
+        const b = doc.createElement('button');
+        b.type = 'button'; b.className = 'cde-plus'; b.textContent = '+';
+        b.dataset.cdeSide = side;
+        b.title = title;
+        b.contentEditable = 'false';
+        b.setAttribute('data-cde-ui', '');
+        b.addEventListener('click', (e) => {
+          e.preventDefault(); e.stopPropagation();
+          addCell(cell, side);
+        });
+        cell.appendChild(b);
+      });
+
+      const minus = doc.createElement('button');
+      minus.type = 'button'; minus.className = 'cde-minus'; minus.textContent = '\u2212';
+      minus.title = '이 칸 삭제';
+      minus.contentEditable = 'false';
+      minus.setAttribute('data-cde-ui', '');
+      minus.addEventListener('click', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        removeCell(cell);
+      });
+      cell.appendChild(minus);
+
+      const pick = doc.createElement('div');
+      pick.className = 'cde-pick';
+      pick.contentEditable = 'false';
+      pick.setAttribute('data-cde-ui', '');
+      [['list', '글목록'], ['image', '그림'], ['table', '표'], ['code', '코드']]
+        .forEach(([kind, label]) => {
+          const b = doc.createElement('button');
+          b.type = 'button';
+          b.textContent = label;
+          b.addEventListener('click', (e) => {
+            e.preventDefault(); e.stopPropagation();
+            insertInto(cell, kind);
+          });
+          pick.appendChild(b);
+        });
+      cell.appendChild(pick);
+
+      [...cell.children].filter(notUI).forEach((item) => {
+        delButton(doc, item);
+        gripButton(doc, item);
+      });
+    });
+    body.querySelectorAll('.cde-cell li').forEach((li) => delButton(doc, li, true));
+  }
+
+  // Dragging text would fight with editing it, so a block travels by its grip.
+  function gripButton(doc, item) {
+    const b = doc.createElement('button');
+    b.type = 'button';
+    b.className = 'cde-grip';
+    b.textContent = '\u2059';
+    b.title = '끌어서 다른 칸으로';
+    b.contentEditable = 'false';
+    b.setAttribute('data-cde-ui', '');
+    b.addEventListener('pointerdown', (e) => startCellDrag(e, item));
+    item.appendChild(b);
+    return b;
+  }
+
+  // Move one block into whatever cell it is dropped on.
+  function startCellDrag(e, item) {
+    if (e.button !== 0) return;
+    e.preventDefault(); e.stopPropagation();
+    const doc = item.ownerDocument;
+    const grip = e.currentTarget;
+    try { grip.setPointerCapture(e.pointerId); } catch (err) { /* synthetic pointer */ }
+    let target = null;
+    item.setAttribute('data-cde-lift', '');
+
+    const move = (ev) => {
+      const under = doc.elementFromPoint(ev.clientX, ev.clientY);
+      const cell = under && under.closest ? under.closest('.cde-cell') : null;
+      if (cell === target) return;
+      target?.removeAttribute('data-cde-drop');
+      target = cell;
+      target?.setAttribute('data-cde-drop', '');
+    };
+    const up = () => {
+      doc.removeEventListener('pointermove', move);
+      doc.removeEventListener('pointerup', up);
+      item.removeAttribute('data-cde-lift');
+      target?.removeAttribute('data-cde-drop');
+      if (target && target !== item.parentElement) {
+        pushUndo();
+        target.appendChild(item);
+        syncGrid(currentBody());
+        select(current);
+        markDirty('칸 이동 - 저장 대기');
+      }
+    };
+    doc.addEventListener('pointermove', move);
+    doc.addEventListener('pointerup', up);
+  }
+
+  function askImage(mbox, index, side, cell) {
+    pendingInsert = { mbox, index, side, cell };
     fileInput.value = '';
     fileInput.click();
   }
@@ -705,6 +1043,17 @@
     insertImage(src, file.name);
   });
 
+  function newFigure(doc, src, alt) {
+    const fig = doc.createElement('figure');
+    fig.className = 'fig';
+    const frame = doc.createElement('span');
+    frame.className = 'frame';
+    const img = doc.createElement('img');
+    img.src = src; img.alt = alt || '';
+    frame.appendChild(img); fig.appendChild(frame);
+    return fig;
+  }
+
   function insertImage(src, alt) {
     const doc = sdoc();
     const body = currentBody();
@@ -713,19 +1062,26 @@
     pendingInsert = null;
     pushUndo();
 
+    // A grid body has no media area - the picture lands in a cell.
+    if (isGrid(body)) {
+      const cell = (where?.cell && body.contains(where.cell)) ? where.cell
+        : body.querySelector('.cde-cell[data-cde-empty]') || body.querySelector('.cde-cell');
+      if (!cell) return;
+      cell.appendChild(newFigure(doc, src, alt));
+      syncGrid(body);
+      select(current);
+      markDirty();
+      say('그림 추가 - ' + src, 'ok');
+      return;
+    }
+
     let mbox = where?.mbox;
     if (!mbox || !body.contains(mbox)) {
       if (!body.querySelector('.cde-media')) normalize(currentSlide(), 'bottom');
       mbox = currentBody().querySelector('.cde-media');
     }
 
-    const fig = doc.createElement('figure');
-    fig.className = 'fig';
-    const frame = doc.createElement('span');
-    frame.className = 'frame';
-    const img = doc.createElement('img');
-    img.src = src; img.alt = alt || '';
-    frame.appendChild(img); fig.appendChild(frame);
+    const fig = newFigure(doc, src, alt);
 
     const items = [...mbox.children].filter(notUI);
     let cols = Number(mbox.style.getPropertyValue('--cde-cols')) || 1;
@@ -762,20 +1118,77 @@
     $('cols').textContent = value;
   }
 
+  // --- 글자 크기 --------------------------------------------------------------
+  // Sizes are written back as px on the blocks themselves, so a saved deck keeps
+  // them with the editor closed - printing included.
+  const FS_STEP = 1.08;
+  const FS_TEXT = 'p, li, td, th, dt, dd, code, pre, blockquote, figcaption,'
+                + '.lead, .card, .ul, .tbl, h1, h2, h3, h4';
+
+  // A picked block on its own, otherwise every text block on the slide.
+  function fontTargets() {
+    const doc = sdoc();
+    const root = doc.querySelector('[data-cde-sel]') || currentBody()
+      || (docMode ? doc.body : null);
+    if (!root) return null;
+    const list = [root, ...root.querySelectorAll(FS_TEXT)]
+      .filter((el) => !el.hasAttribute('data-cde-ui') && !el.closest('[data-cde-ui]'));
+    return { root, list };
+  }
+
+  function scaleFont(mul) {
+    const targets = fontTargets();
+    if (!targets) return;
+    const { root, list } = targets;
+    const was = Number(root.dataset.cdeFs) || 1;
+    const now = Math.max(0.5, Math.min(2.5, was * mul));
+    if (Math.abs(now - was) < 0.001) { say('더 조절할 수 없다', 'warn'); return; }
+    pushUndo();
+    const step = now / was;
+    // Measure everything before writing: sizing a parent first would leave the
+    // children inheriting the new size and scaling it a second time.
+    const sizes = list.map((el) => parseFloat(el.style.fontSize)
+      || parseFloat(getComputedStyle(el).fontSize) || 16);
+    list.forEach((el, i) => { el.style.fontSize = (sizes[i] * step).toFixed(2) + 'px'; });
+    root.dataset.cdeFs = now.toFixed(3);
+    syncToolbar();
+    markDirty('글자 크기 - 저장 대기');
+  }
+
   function syncToolbar() {
     const body = currentBody();
-    const has = !!body?.querySelector('.cde-media')?.children.length;
-    const name = layoutName(body);
-    const spec = LAYOUTS.find((l) => l[0] === name);
-    $('layIcon').innerHTML = spec ? layoutIcon(name) : '';
-    $('layName').textContent = body ? (spec ? spec[1] : '덱 원래 배치') : '레이아웃';
+    const grid = isGrid(body) ? gridSpec(body) : '';
+    const known = grid ? GRIDS.find((g) => g[0] === grid) : null;
+    $('layIcon').innerHTML = grid ? gridIcon(grid) : '';
+    $('layName').textContent = !body ? '배치'
+      : known ? known[1] : grid ? '분할 ' + grid : '덱 원래 배치';
     bar.querySelector('[data-act="pick"]').disabled = !body;
     $('layMenu').querySelectorAll('button').forEach((b) => {
-      b.setAttribute('aria-pressed', String(b.dataset.layout === name));
+      b.setAttribute('aria-pressed', String(b.dataset.layout === grid));
     });
-    $('cols').textContent = body?.style.getPropertyValue('--cde-cols') || '1';
+    const band = grid ? selectedCell()?.parentElement : null;
+    const has = grid
+      ? true
+      : !!body?.querySelector('.cde-media')?.children.length;
+    $('cols').textContent = grid
+      ? String(cellsOf(band || bandsOf(body)[0]).length)
+      : (body?.style.getPropertyValue('--cde-cols') || '1');
     bar.querySelectorAll('[data-act^="cols"]').forEach((b) => { b.disabled = !has; });
+    const fsRoot = sdoc()?.querySelector('[data-cde-sel]') || body
+      || (docMode ? sdoc()?.body : null);
+    $('fs').textContent = Math.round((Number(fsRoot?.dataset.cdeFs) || 1) * 100) + '%';
+    // A document has no .body to point at, but its text still scales.
+    bar.querySelectorAll('[data-act^="fs"]').forEach((b) => { b.disabled = !body && !docMode; });
     bar.querySelector('[data-act="undo"]').disabled = !undoStack.length;
+  }
+
+  // The cell the toolbar acts on: the one holding the selection, else the last.
+  function selectedCell() {
+    const body = currentBody();
+    if (!isGrid(body)) return null;
+    const sel = sdoc().querySelector('[data-cde-sel]');
+    const cells = [...body.querySelectorAll('.cde-cell')];
+    return sel?.closest('.cde-cell') || cells[cells.length - 1] || null;
   }
 
   // Page numbers are baked into each slide, so a reorder has to rewrite them.
@@ -1204,7 +1617,14 @@
     if (act === 'saveas') saveAs();
     if (act === 'add') askImage(null, null, null);
     if (act === 'undo') undo();
+    if (act === 'fs+') { scaleFont(FS_STEP); return; }
+    if (act === 'fs-') { scaleFont(1 / FS_STEP); return; }
     if (act === 'cols+' || act === 'cols-') {
+      const cell = selectedCell();
+      if (cell) {
+        if (act === 'cols+') addCell(cell, 'right'); else removeCell(cell);
+        return;
+      }
       pushUndo();
       setCols(Number($('cols').textContent) + (act === 'cols+' ? 1 : -1));
       select(current);
@@ -1212,30 +1632,14 @@
     }
   });
 
-  function setLayout(name) {
-    const slide = currentSlide();
-    if (!slide) return;
-    pushUndo();
-    sdoc().querySelectorAll('.cde-handle').forEach((el) => el.remove());
-    normalize(slide, name);
-    const body = currentBody();
-    body.style.removeProperty('--cde-a');
-    body.querySelectorAll('.cde-media').forEach((m) => {
-      m.style.removeProperty('--cde-ctpl');
-      m.style.removeProperty('--cde-rtpl');
-    });
-    select(current);
-    markDirty();
-  }
-
   (() => {
     const menu = $('layMenu');
-    LAYOUTS.forEach(([name, label]) => {
+    GRIDS.forEach(([spec, label]) => {
       const b = document.createElement('button');
       b.type = 'button';
-      b.dataset.layout = name;
-      b.innerHTML = layoutIcon(name) + '<span>' + label + '</span>';
-      b.addEventListener('click', () => { menu.hidden = true; setLayout(name); });
+      b.dataset.layout = spec;
+      b.innerHTML = gridIcon(spec) + '<span>' + label + '</span>';
+      b.addEventListener('click', () => { menu.hidden = true; applyGrid(spec); });
       menu.appendChild(b);
     });
     document.addEventListener('click', (e) => {

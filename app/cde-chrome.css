@@ -127,3 +127,66 @@ html[data-cde="rail"] .cde-no {
 }
 html[data-cde="rail"] .cde-handle, html[data-cde="rail"] .cde-plus,
 html[data-cde="rail"] .cde-del { display: none !important; }
+
+/* --- 등분 배치 (에디터 전용) --- */
+[data-cde-edit] .cde-cell { position: relative; }
+[data-cde-edit] .cde-cell[data-cde-empty] {
+  outline: 2px dashed rgba(37, 99, 235, 0.35); outline-offset: -6px; border-radius: 10px;
+}
+[data-cde-edit] .cde-cell[data-cde-drop] {
+  outline: 3px solid #2563eb; outline-offset: -6px; border-radius: 10px;
+  background: rgba(37, 99, 235, 0.06);
+}
+[data-cde-edit] [data-cde-lift] { opacity: 0.4; }
+
+/* 행 경계 손잡이는 본문 안에, 칸 경계 손잡이는 행 안에 절대 배치된다. */
+[data-cde-edit] .cde-band { position: relative; }
+
+/* 블록을 다른 칸으로 옮기는 손잡이. 글 편집과 겹치지 않게 따로 둔다. */
+.cde-grip {
+  position: absolute; z-index: 46; top: 4px; left: 4px;
+  width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px;
+  background: #e2e8f0; color: #334155; cursor: grab;
+  font: 700 15px/1 'Inter', system-ui, sans-serif;
+  opacity: 0; transition: opacity 0.12s;
+}
+.cde-cell > *:hover > .cde-grip, .cde-grip:hover { opacity: 1; }
+.cde-grip:active { cursor: grabbing; }
+[data-cde-edit] .cde-cell > * { position: relative; }
+
+/* 칸을 늘리고 줄이는 손잡이. 그림 추가 버튼과 같은 모양이되 칸에 붙는다. */
+.cde-cell > .cde-plus, .cde-cell > .cde-minus { opacity: 0; }
+.cde-cell:hover > .cde-plus, .cde-cell:hover > .cde-minus,
+.cde-plus:hover, .cde-minus:hover { opacity: 1; }
+.cde-minus {
+  position: absolute; z-index: 46; width: 26px; height: 26px; padding: 0;
+  top: 6px; right: 6px; border: 0; border-radius: 50%; cursor: pointer;
+  background: #64748b; color: #fff;
+  font: 700 17px/1 'Inter', system-ui, sans-serif;
+  transition: opacity 0.12s;
+}
+.cde-minus:hover { background: #b91c1c; }
+/* 칸은 넘치는 내용을 잘라내므로, 칸에 붙는 + 는 안쪽에 앉힌다. */
+.cde-cell > .cde-plus[data-cde-side="left"]   { left: 4px; }
+.cde-cell > .cde-plus[data-cde-side="right"]  { right: 4px; }
+.cde-cell > .cde-plus[data-cde-side="top"]    { top: 4px; }
+.cde-cell > .cde-plus[data-cde-side="bottom"] { bottom: 4px; }
+
+/* 빈 칸에 무엇을 넣을지 고르는 칩. 내용이 있으면 구석에서 하나 더 붙인다. */
+.cde-pick {
+  position: absolute; z-index: 46; display: flex; gap: 6px; flex-wrap: wrap;
+  left: 50%; top: 50%; transform: translate(-50%, -50%);
+  justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.12s;
+}
+.cde-cell[data-cde-empty] > .cde-pick, .cde-cell:hover > .cde-pick {
+  opacity: 1; pointer-events: auto;
+}
+.cde-cell:not([data-cde-empty]) > .cde-pick {
+  left: auto; top: auto; right: 8px; bottom: 8px; transform: none;
+}
+.cde-pick button {
+  font: 600 12px/1 'Inter', 'Noto Sans KR', system-ui, sans-serif;
+  padding: 6px 10px; border: 1px solid #cbd5e1; border-radius: 999px;
+  background: #fff; color: #1e293b; cursor: pointer;
+}
+.cde-pick button:hover { border-color: #2563eb; color: #2563eb; }

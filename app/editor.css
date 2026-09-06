@@ -39,6 +39,8 @@ body {
 .lay, .chk { display: flex; align-items: center; gap: 6px; color: var(--muted); white-space: nowrap; }
 .lay button { padding: 3px 9px; line-height: 1; }
 #cols { min-width: 18px; text-align: center; font-weight: 700; color: var(--ink); }
+#fs { min-width: 40px; text-align: center; font-weight: 700; color: var(--ink);
+      font-variant-numeric: tabular-nums; }
 
 .split { flex: 1 1 auto; display: flex; min-height: 0; }
 .rail {
