@@ -135,7 +135,7 @@
     // so Esc is what steps out of a block before deleting it.
     doc.addEventListener('pointerdown', (e) => {
       if (e.target.closest('[data-cde-ui]')) return;
-      selectItem(e.target.closest(DELETABLE));
+      selectItem(e.target.closest(docMode ? DOC_BLOCKS : DELETABLE));
     });
     doc.addEventListener('keydown', shortcuts);
     doc.addEventListener('keydown', (e) => {
@@ -1261,7 +1261,7 @@
     });
     from.after(copy);
     slides(sdoc()).forEach((s, i) => { s.dataset.cdeSlide = String(i); });
-    sdoc().querySelectorAll(cfg.editable).forEach((el) => el.setAttribute('contenteditable', 'true'));
+    makeEditable(sdoc());
     renumber();
     railFollow();
     select(current + 1);
@@ -1351,6 +1351,7 @@
 
   function setPanelMode() {
     docMode = !slides(sdoc()).length;
+    sdoc().documentElement.toggleAttribute('data-cde-doc', docMode);
     rail.hidden = docMode;
     $('addSlide').hidden = docMode;
     $('outline').hidden = !docMode;
@@ -1476,7 +1477,8 @@
   // --- undo ------------------------------------------------------------------
   // One entry per action: the slide container as it looked just before it.
   function deckHost() {
-    return slides(sdoc())[0]?.parentElement || null;
+    // A document is one long page: its own body is what an undo step holds.
+    return slides(sdoc())[0]?.parentElement || (docMode ? sdoc().body : null);
   }
 
   function pushUndo() {
@@ -1499,7 +1501,7 @@
     host.innerHTML = step.html;
     const doc = sdoc();
     slides(doc).forEach((s, i) => { s.dataset.cdeSlide = String(i); });
-    doc.querySelectorAll(cfg.editable).forEach((el) => el.setAttribute('contenteditable', 'true'));
+    makeEditable(doc);
     renumber();
     railFollow();
     current = Math.min(step.index, slides(doc).length - 1);
@@ -1512,6 +1514,7 @@
     const root = sdoc().documentElement.cloneNode(true);
     root.removeAttribute('data-cde');
     root.removeAttribute('data-cde-edit');
+    root.removeAttribute('data-cde-doc');
     root.removeAttribute('style');
     root.querySelectorAll('[data-cde-ui]').forEach((el) => el.remove());
     root.querySelectorAll('[contenteditable]').forEach((el) => el.removeAttribute('contenteditable'));

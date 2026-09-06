@@ -6,6 +6,9 @@ html[data-cde="stage"], html[data-cde="stage"] body {
   height: 100%; margin: 0; overflow: hidden;
   background: #eef2f7;
 }
+/* 슬라이드는 한 장이 화면에 맞춰지지만 문서는 길다 - 잘라내지 않고 굴린다. */
+html[data-cde="stage"][data-cde-doc],
+html[data-cde="stage"][data-cde-doc] body { height: auto; overflow: visible; }
 html[data-cde="stage"] body { position: relative; }
 /* 현재 장에는 display 를 지정하지 않는다. 강제하면 덱이 정한 배치를 덮어써
    방향이 뒤집힌다 - 덱이 flex-direction 이나 grid 를 쓰면 그대로 깨진다. */
