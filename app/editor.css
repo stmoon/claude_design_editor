@@ -21,6 +21,9 @@ body {
   padding: 9px 14px; background: var(--panel);
   border-bottom: 1px solid var(--line);
 }
+/* A select is as wide as its longest option, and min-width:auto keeps it that
+   way - one long deck path would otherwise push the whole bar off-screen. */
+#deck { flex: 0 1 240px; min-width: 90px; text-overflow: ellipsis; }
 .brand { font-weight: 800; letter-spacing: -0.01em; white-space: nowrap; }
 .sep { width: 1px; height: 22px; background: var(--line); }
 /* Flex items shrink by default, which folded button labels into one
