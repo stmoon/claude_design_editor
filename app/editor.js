@@ -886,9 +886,48 @@
     return b;
   }
 
+  // A new block below takes the look of the one it came from: same tag and
+  // classes, placeholder text, a list keeps only its first bullet.
+  function addBelow(item) {
+    pushUndo();
+    const copy = item.cloneNode(true);
+    copy.querySelectorAll('[data-cde-ui]').forEach((el) => el.remove());
+    copy.removeAttribute('data-cde-sel');
+    if (copy.matches('ul, ol')) [...copy.children].slice(1).forEach((el) => el.remove());
+    const leaves = [copy, ...copy.querySelectorAll('[contenteditable]')]
+      .filter((el) => el.hasAttribute('contenteditable') && !el.querySelector('[contenteditable]'));
+    (leaves.length ? leaves : [copy]).forEach((el) => { el.textContent = '새 내용'; });
+    item.after(copy);
+    makeEditable(item.ownerDocument);
+    select(current);
+    selectItem(copy);
+    const target = copy.isContentEditable ? copy : copy.querySelector('[contenteditable]');
+    if (target) {
+      target.focus();
+      item.ownerDocument.getSelection().selectAllChildren(target);
+    }
+    markDirty('추가됨 - 저장 대기');
+  }
+
+  function addBelowButton(doc, item) {
+    const b = doc.createElement('button');
+    b.type = 'button';
+    b.className = 'cde-add';
+    b.textContent = '+';
+    b.title = '아래에 같은 형식으로 추가';
+    b.contentEditable = 'false';
+    b.setAttribute('data-cde-ui', '');
+    b.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      addBelow(item);
+    });
+    item.appendChild(b);
+    return b;
+  }
+
   function mountTools() {
     const doc = sdoc();
-    doc.querySelectorAll('.cde-plus, .cde-del, .cde-minus, .cde-pick, .cde-grip')
+    doc.querySelectorAll('.cde-plus, .cde-del, .cde-add, .cde-minus, .cde-pick, .cde-grip')
        .forEach((el) => el.remove());
     const body = currentBody();
     if (!body) return;
@@ -915,9 +954,13 @@
       });
     });
 
-    // Any block, and any bullet, can be removed - not just figures.
-    body.querySelectorAll('.cde-text').forEach((tbox) => {
-      [...tbox.children].filter(notUI).forEach((item) => delButton(doc, item));
+    // Any block, and any bullet, can be removed - not just figures. Deck-native
+    // bodies name their text box .body-text, so both names get the tools.
+    body.querySelectorAll('.cde-text, .body-text').forEach((tbox) => {
+      [...tbox.children].filter(notUI).forEach((item) => {
+        delButton(doc, item);
+        addBelowButton(doc, item);
+      });
     });
     body.querySelectorAll('.ul > li, .cde-text li').forEach((li) => delButton(doc, li, true));
   }
