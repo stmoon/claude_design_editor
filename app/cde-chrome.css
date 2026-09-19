@@ -79,6 +79,22 @@ html[data-cde="stage"] [data-cde-slide][data-cde-current] {
 [data-cde-edit] *:hover > .cde-del { opacity: 1; }
 .cde-del:hover { background: #b91c1c; opacity: 1; }
 
+/* 문서 단락 도구 - 가리킨 단락 오른쪽에 붙는다. 왼쪽 여백이 단락과 버튼 사이를
+   이어 주어, 버튼으로 옮겨 가는 동안 도구가 다른 단락으로 달아나지 않는다. */
+.cde-doctool {
+  position: absolute; z-index: 50; display: flex; gap: 4px; padding-left: 5px;
+}
+.cde-doctool[hidden], .cde-doctool button[hidden] { display: none; }
+/* contenteditable="false" still matches the dashed editable outline */
+[data-cde-edit] .cde-doctool[contenteditable] { outline: none; }
+.cde-doctool button {
+  width: 26px; height: 26px; padding: 0; border: 0; border-radius: 50%; cursor: pointer;
+  background: #2563eb; color: #fff; font: 700 16px/1 'Inter', system-ui, sans-serif;
+}
+.cde-doctool button:hover { background: #1d4ed8; }
+.cde-doctool button[data-act="del"] { background: rgba(15, 23, 42, 0.8); }
+.cde-doctool button[data-act="del"]:hover { background: #b91c1c; }
+
 [data-cde-edit] [data-cde-sel] {
   outline: 3px solid #2563eb !important; outline-offset: 4px; border-radius: 4px;
 }

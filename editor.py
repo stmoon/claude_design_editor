@@ -36,6 +36,9 @@ DEFAULT_CONFIG = {
     'heading': 'h1, h2, h3',            # 장절 - the outline shown for slideless files
     'editable': ('.title, .kicker, .course, .display, .presenter, .lead, '
                  '.foot-sec, .ul li, .tbl th, .tbl td, .card, p'),
+    # Chrome a deck adds for itself - an in-deck editor, a present button -
+    # that fights the editor and must never reach a saved file.
+    'deckUi': '[data-edit-ui], .present-btn',
     'imageDir': 'imgs',
     'autosave': True,
 }

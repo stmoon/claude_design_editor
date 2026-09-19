@@ -31,7 +31,8 @@
   // described by plain tags instead. Blocks are what a click picks there.
   const DOC_EDIT = 'h1, h2, h3, h4, h5, h6, p, li, dt, dd, td, th, caption,'
                  + 'blockquote, figcaption, pre > code';
-  const DOC_BLOCKS = 'h1, h2, h3, h4, h5, h6, p, ul, ol, dl, table, pre,'
+  // Items, not whole lists: a click on a bullet picks that one bullet.
+  const DOC_BLOCKS = 'h1, h2, h3, h4, h5, h6, p, li, dt, dd, table, pre,'
                    + 'blockquote, figure';
 
   let cfg = null, deckName = '', current = 0, dirty = false;
@@ -104,15 +105,7 @@
     doc.documentElement.dataset.cdeEdit = '';
     injectChrome(doc);
     ensureLayoutLink(doc);
-    // Any in-deck editor would fight over the same keys and save a half-edited
-    // document. Drop its chrome and swallow its shortcuts.
-    doc.querySelectorAll('[data-edit-ui]').forEach((el) => el.remove());
-    doc.addEventListener('keydown', (e) => {
-      // Only bare E/S belong to the old in-deck editor. Swallowing modified
-      // keys here would have eaten Ctrl+S before our own handler ran.
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
-      if (!e.target.isContentEditable && 'eEsS'.includes(e.key)) e.stopImmediatePropagation();
-    }, true);
+    dropDeckUi(doc);
 
     slides(doc).forEach((s, i) => { s.dataset.cdeSlide = String(i); });
     // No normalising on open. A deck may use its own layout - .lead, .cols,
@@ -137,6 +130,11 @@
       if (e.target.closest('[data-cde-ui]')) return;
       selectItem(e.target.closest(docMode ? DOC_BLOCKS : DELETABLE));
     });
+    doc.addEventListener('pointermove', (e) => {
+      if (!docMode || e.target.closest('[data-cde-ui]')) return;
+      const item = e.target.closest(DOC_BLOCKS);
+      if (item && item !== docTool(doc).cdeItem) showDocTool(item);
+    }, { passive: true });
     doc.addEventListener('keydown', shortcuts);
     doc.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') { doc.activeElement?.blur?.(); return; }
@@ -159,6 +157,20 @@
     doc.querySelectorAll(editableSelector()).forEach((el) => {
       if (!el.closest('[data-cde-ui]')) el.setAttribute('contenteditable', 'true');
     });
+  }
+
+  // A deck brings chrome of its own - an in-deck editor, a present button. It
+  // fights the editor over the same keys, and anything it appended at runtime
+  // would land in the saved file, so it goes before either iframe is wired up.
+  function dropDeckUi(doc) {
+    doc.querySelectorAll(cfg.deckUi).forEach((el) => el.remove());
+    doc.addEventListener('keydown', (e) => {
+      // Only the bare letters belong to that chrome - E/S to an in-deck editor,
+      // F to a present button. Swallowing modified keys here would have eaten
+      // Ctrl+S before our own handler ran.
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (!e.target.isContentEditable && 'eEsSfF'.includes(e.key)) e.stopImmediatePropagation();
+    }, true);
   }
 
   function injectChrome(doc) {
@@ -836,6 +848,17 @@
   function removeItem(item) {
     if (!item || item.hasAttribute('data-cde-ui')) return;
     pushUndo();
+    if (docMode) {
+      const list = item.parentElement;
+      item.remove();
+      // A list with no items left would still save, and still indent.
+      if (list?.matches('ul, ol, dl') && !list.querySelector(':scope > li, :scope > dt, :scope > dd')) {
+        list.remove();
+      }
+      showDocTool(null);
+      markDirty('삭제됨 - 저장 대기');
+      return;
+    }
     const cell = item.parentElement?.closest('.cde-cell');
     if (cell) {
       item.remove();
@@ -1438,13 +1461,84 @@
     [...box.children].forEach((b, i) => b.toggleAttribute('data-cur', i === at));
   }
 
+  // --- 문서 단락 도구 ----------------------------------------------------------
+  // A document can run to hundreds of paragraphs, so one floating tool follows
+  // the pointer instead of a button being planted inside every block.
+  function docTool(doc) {
+    let tool = doc.body.querySelector(':scope > .cde-doctool');
+    if (tool) return tool;
+    tool = doc.createElement('div');
+    tool.className = 'cde-doctool';
+    tool.contentEditable = 'false';
+    tool.setAttribute('data-cde-ui', '');
+    tool.hidden = true;
+    [['sub', '+', '세부 항목 추가'], ['del', '×', '이 단락 삭제 (Esc 후 Del)']]
+      .forEach(([act, label, title]) => {
+        const b = doc.createElement('button');
+        b.type = 'button';
+        b.dataset.act = act;
+        b.textContent = label;
+        b.title = title;
+        tool.appendChild(b);
+      });
+    tool.addEventListener('click', (e) => {
+      const act = e.target.closest('button')?.dataset.act;
+      const item = tool.cdeItem;
+      if (!act || !item?.isConnected) return;
+      if (act === 'del') removeItem(item); else addSubItem(item);
+    });
+    doc.body.appendChild(tool);
+    return tool;
+  }
+
+  function showDocTool(item) {
+    const doc = sdoc();
+    const tool = docTool(doc);
+    tool.cdeItem = item;
+    tool.hidden = !item;
+    if (!item) return;
+    tool.querySelector('[data-act="sub"]').hidden = item.tagName !== 'LI';
+    // The body is the positioning context, so the tool scrolls with the text.
+    const r = item.getBoundingClientRect(), b = doc.body.getBoundingClientRect();
+    const room = doc.documentElement.clientWidth - b.left - 64;
+    tool.style.top = (r.top - b.top) + 'px';
+    tool.style.left = Math.min(r.right - b.left - 1, room) + 'px';
+  }
+
+  // A top-level bullet grows a nested list; a sub-item gets a sibling below it,
+  // so clicking + again keeps adding at the same depth.
+  function addSubItem(li) {
+    const doc = li.ownerDocument;
+    pushUndo();
+    const item = doc.createElement('li');
+    item.textContent = '새 세부 항목';
+    if (li.parentElement.parentElement?.closest('li')) {
+      li.after(item);
+    } else {
+      const list = li.querySelector(':scope > ul, :scope > ol')
+        || li.appendChild(doc.createElement('ul'));
+      list.appendChild(item);
+    }
+    makeEditable(doc);
+    // Nested editables share their outer host; a selection inside is what
+    // puts the caret there, ready to type over the placeholder.
+    item.focus();
+    const range = doc.createRange();
+    range.selectNodeContents(item);
+    doc.getSelection().removeAllRanges();
+    doc.getSelection().addRange(range);
+    selectItem(item);
+    showDocTool(item);
+    markDirty('세부 항목 추가 - 저장 대기');
+  }
+
   // --- rail ----------------------------------------------------------------
   function initRail() {
     const doc = rdoc();
     doc.documentElement.dataset.cde = 'rail';
     injectChrome(doc);
     ensureLayoutLink(doc);
-    doc.querySelectorAll('[data-edit-ui]').forEach((el) => el.remove());
+    dropDeckUi(doc);
     slides(doc).forEach((s, i) => { s.dataset.cdeSlide = String(i); });
     // Delegated so it survives thumbnails being rebuilt, and so a click
     // anywhere in the strip - badge, padding, slide - still selects.
