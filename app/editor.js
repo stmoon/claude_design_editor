@@ -46,6 +46,11 @@
   const rdoc = () => rail.contentDocument;
   const slides = (doc) => [...doc.querySelectorAll(cfg.slide)];
 
+  function syncUrl() {
+    const q = '?deck=' + encodeURIComponent(deckName) + '&slide=' + (current + 1);
+    if (location.search !== q) history.replaceState(null, '', q);
+  }
+
   function say(text, tone) {
     statusEl.textContent = text;
     if (tone) statusEl.dataset.tone = tone; else delete statusEl.dataset.tone;
@@ -79,7 +84,13 @@
         : sel;
       list.forEach((f) => parent.appendChild(new Option(f.split('/').pop(), f)));
     });
-    deckName = cfg.deck && files.includes(cfg.deck) ? cfg.deck : files[0];
+    // ?deck=<path>&slide=<n> reopens the same file and slide, so a bookmark or
+    // a reload lands where the work was.
+    const want = new URLSearchParams(location.search);
+    const wantDeck = want.get('deck');
+    deckName = wantDeck && files.includes(wantDeck) ? wantDeck
+      : cfg.deck && files.includes(cfg.deck) ? cfg.deck : files[0];
+    current = Math.max(0, (Number(want.get('slide')) || 1) - 1);
     sel.value = deckName;
     sel.addEventListener('change', () => {
       if (dirty && !confirm('저장하지 않은 변경이 있다. 버릴까?')) {
@@ -92,6 +103,7 @@
   }
 
   function load() {
+    syncUrl();
     stage.src = deckUrl(deckName);
     rail.src = deckUrl(deckName);
     stage.onload = initStage;
@@ -473,6 +485,7 @@
       s.parentElement?.toggleAttribute('data-cde-current', i === current);
     });
     rl?.[current]?.parentElement?.scrollIntoView({ block: 'nearest' });
+    syncUrl();
     // Redrawing the chrome must never be able to block navigation, and a
     // failure in one part must not leave the toolbar describing another slide.
     try {
@@ -867,6 +880,14 @@
       markDirty('삭제됨 - 저장 대기');
       return;
     }
+    const native = item.parentElement?.closest('.body-media');
+    if (native) {
+      item.remove();
+      removedFromNative(native);
+      select(current);
+      markDirty('삭제됨 - 저장 대기');
+      return;
+    }
     const mbox = item.parentElement?.closest('.cde-media');
     item.remove();
     if (mbox) {
@@ -885,6 +906,29 @@
     if (body?.dataset.cdeLayout) normalize(currentSlide(), body.dataset.cdeLayout);
     select(current);
     markDirty('삭제됨 - 저장 대기');
+  }
+
+  // A deck-native media box sizes its grid from --cols; the dragged tracks
+  // described the old grid. An emptied box goes, and the text takes the slide.
+  function removedFromNative(mbox) {
+    const body = mbox.closest('.body');
+    const left = [...mbox.children].filter(notUI).length;
+    mbox.style.removeProperty('--ctpl');
+    mbox.style.removeProperty('--rtpl');
+    if (!left) {
+      mbox.remove();
+      if (body) {
+        body.style.removeProperty('--split');
+        body.style.setProperty('--cols', '1');
+        if (body.querySelector('.body-text')) body.dataset.layout = 'text';
+      }
+      return;
+    }
+    const cols = Number(mbox.style.getPropertyValue('--cols')) || 1;
+    if (left < cols) {
+      mbox.style.setProperty('--cols', String(left));
+      body?.style.setProperty('--cols', String(left));
+    }
   }
 
   function selectItem(item) {
@@ -956,6 +1000,12 @@
     if (!body) return;
 
     if (isGrid(body)) { cellTools(doc, body); return; }
+
+    // Deck-native media boxes get delete only; adding keeps to the editor's
+    // own model, which insertImage builds.
+    body.querySelectorAll('.body-media').forEach((mbox) => {
+      [...mbox.children].filter(notUI).forEach((item) => delButton(doc, item));
+    });
 
     body.querySelectorAll('.cde-media').forEach((mbox) => {
       [...mbox.children].filter(notUI).forEach((item, index) => {
@@ -1700,6 +1750,7 @@
     const sel = $('deck');
     if (![...sel.options].some((o) => o.value === info.name)) sel.add(new Option(info.name, info.name));
     deckName = info.name; sel.value = info.name;
+    syncUrl();
     lastMtime = info.mtime; dirty = false;
     say('저장됨 - ' + info.name, 'ok');
   }

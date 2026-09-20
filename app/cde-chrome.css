@@ -67,6 +67,7 @@ html[data-cde="stage"] [data-cde-slide][data-cde-current] {
 [data-cde-edit] .cde-text > *:not([data-cde-ui]),
 [data-cde-edit] .cde-text li,
 [data-cde-edit] .body-text > *:not([data-cde-ui]),
+[data-cde-edit] .body-media > *:not([data-cde-ui]),
 [data-cde-edit] .body-text li { position: relative; }
 .cde-del {
   position: absolute; z-index: 45; top: 6px; right: 6px;
