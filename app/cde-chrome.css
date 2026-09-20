@@ -76,7 +76,8 @@ html[data-cde="stage"] [data-cde-slide][data-cde-current] {
   font: 700 15px/1 'Inter', system-ui, sans-serif;
   opacity: 0; transition: opacity 0.12s;
 }
-.cde-del-sm { width: 20px; height: 20px; top: 2px; right: -26px; font-size: 12px; }
+/* 불릿 하나를 지우는 작은 버튼. 글 상자가 넘치는 부분을 잘라내므로 안쪽에 둔다 */
+.cde-del-sm { width: 20px; height: 20px; top: 2px; right: 2px; font-size: 12px; }
 [data-cde-edit] *:hover > .cde-del { opacity: 1; }
 .cde-del:hover { background: #b91c1c; opacity: 1; }
 
