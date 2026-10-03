@@ -74,6 +74,9 @@ def find_decks():
             continue
         if path.suffix.lower() not in ('.html', '.htm') or path.name.startswith('_'):
             continue
+        # build_deck.py backups (<name>.bak.html, <name>.bak-<stamp>.html) stay out of the list
+        if '.bak' in path.name:
+            continue
         out.append(rel.as_posix())
     return sorted(out, key=lambda s: (s.count('/'), s.lower()))
 
